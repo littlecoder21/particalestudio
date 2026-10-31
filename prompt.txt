@@ -1,0 +1,168 @@
+# Upgrade Existing Particle Engine into an Advanced Particle Studio
+
+I have an existing React + TypeScript Canvas 2D particle engine. I want to evolve it into a powerful, professional, extensible Particle Generator and Particle Studio.
+
+IMPORTANT: Treat my existing code as the starting point. Do not discard working functionality or perform an unnecessary complete rewrite.
+
+My current engine includes:
+- Point, Circle, Ring, Line, and Fountain emitters.
+- Float, Orbit, Flow, and Burst motion.
+- Circle, Square, Diamond, and Star shapes.
+- Repel, Attract, Swirl interactions.
+- Gravity, opacity, glow, trails, and color transitions.
+- Pointer interaction and FPS monitoring.
+
+Preserve these capabilities while evolving their architecture.
+
+## Main objectives
+
+### 1. SVG import and particle sampling
+Build a complete SVG import system supporting:
+- SVG path parsing.
+- Multiple paths and groups.
+- SVG transforms.
+- Compound paths and holes.
+- Outline sampling.
+- Fill sampling.
+- Combined outline and fill.
+- Uniform, random, weighted, and density-based distributions.
+- Source color preservation.
+- Individual path selection.
+- Particle density and spacing controls.
+- Shape reconstruction.
+
+### 2. Advanced particle generators
+Create a modular generator library with:
+- Geometric generators.
+- Organic generators.
+- Noise-based generators.
+- Fluid-like generators.
+- Network generators.
+- Energy generators.
+- Pattern generators.
+- 3D spatial generators.
+- SVG, image, text, and path generators.
+
+Each generator must create editable particle configurations rather than hardcoded visual animations.
+
+### 3. Advanced behavior engine
+Implement independently stackable behaviors:
+- Curl noise.
+- Perlin/simplex noise.
+- Flow fields.
+- Vortex.
+- Attraction and repulsion.
+- Gravity and drag.
+- Spring forces.
+- Flocking.
+- Diffusion.
+- Path following.
+- Collision.
+- Turbulence.
+- Mouse and touch interaction.
+- Morphing and reassembly.
+
+Behaviors must be independently configurable, reusable, and composable.
+
+### 4. Particle Morph system
+Allow users to transform particles between SVG shapes, images, text, and generated formations.
+
+Support particle correspondence, unmatched particles, timing, easing, turbulence during transitions, and reverse transformations.
+
+### 5. Advanced visual system
+Add:
+- More particle shapes.
+- SVG and image sprites.
+- Gradients.
+- Color curves.
+- Size and opacity curves.
+- Glow and bloom.
+- Trails and ribbons.
+- Textures.
+- Blend modes.
+- Depth and directional rendering.
+
+### 6. Video export
+Implement actual working exports:
+- MP4.
+- WebM.
+- GIF.
+- APNG.
+- PNG sequences.
+
+Include resolution, frame rate, duration, background transparency where supported, quality, and export progress.
+
+Use a deterministic timestamp-based export renderer with a controlled simulation clock. Provide browser-compatible encoding fallbacks.
+
+### 7. Code export
+Implement actual runnable code generation:
+- Single-file HTML.
+- HTML + CSS + JavaScript.
+- React component.
+- TypeScript component.
+- WebGL-compatible runtime where applicable.
+
+Generate a minimal runtime containing only the features used by the project.
+
+Include assets, configuration, responsive canvas setup, resize handling, interaction, cleanup, and error handling.
+
+Provide code preview, individual file copying, and complete ZIP export.
+
+### 8. Performance architecture
+Gradually introduce:
+- Typed-array particle storage.
+- Fixed-timestep simulation.
+- Object pooling where useful.
+- Spatial partitioning.
+- Sprite and texture caching.
+- Web Workers where appropriate.
+- Canvas 2D and WebGL2 renderer abstraction.
+- Adaptive quality.
+- GPU instancing.
+- Performance monitoring.
+
+Do not prematurely migrate every feature to GPU simulation. Benchmark before choosing CPU or GPU implementations.
+
+### 9. Editor experience
+Build a clean, professional visual editor with:
+- Generator library.
+- Source and layer management.
+- Central viewport.
+- Context-sensitive properties.
+- Behavior stack.
+- Appearance controls.
+- Timeline.
+- Presets.
+- Undo/redo.
+- Export dialog.
+- Beginner and advanced modes.
+
+Make the interface powerful but easy to understand.
+
+## Implementation requirements
+
+Before modifying the project:
+
+1. Inspect the existing source files and project architecture.
+2. Identify reusable functionality.
+3. Identify limitations and dependencies.
+4. Propose the module structure.
+5. Explain the migration strategy.
+
+Then implement in stages.
+
+Do not attempt to implement everything in one step.
+
+For every stage:
+- Provide complete working code.
+- Preserve existing behavior.
+- Use strict TypeScript types.
+- Avoid placeholder functionality.
+- Test the implementation.
+- Check performance.
+- Explain which files changed.
+- Identify what remains for the next stage.
+
+Do not build a visually impressive interface with nonfunctional controls. Every visible control must perform its intended action.
+
+The final product should be an extensible particle creation engine, not just a particle animation demo.
