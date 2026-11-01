@@ -3,6 +3,9 @@
  * The shader studio re-uses the existing studio classes (.studio, .topbar, .workspace,
  * .control-dock, .section-tab, .range-control, …); this file only adds what is new.
  * Import it after styles.css.
+ *
+ * Everything that changes the phone layout is scoped to `.shader-studio`, so the
+ * Particle studio keeps using the original rules from styles.css.
  */
 
 /* ───────── mode panes & switch ───────── */
@@ -67,6 +70,7 @@
 
 /* ───────── shader studio ───────── */
 
+.shader-studio { --bar-h: 40px; }
 .shader-studio .project-title { max-width: 30vw; overflow: hidden; text-overflow: ellipsis; }
 
 .shader-name-input {
@@ -83,6 +87,7 @@
 .shader-name-input:focus-visible { outline: none; border-bottom-color: #c09dff; }
 
 .shader-studio .canvas-wrap { background: #05060b; }
+.shader-studio .toast { z-index: 40; }
 
 .shader-error {
   position: absolute;
@@ -136,11 +141,6 @@
 .shader-studio .text-action { display: inline-block; margin-top: 4px; }
 
 .shader-studio .svg-select-control { margin-top: 0; }
-.shader-studio .export-card .svg-upload-button { margin-top: 9px; }
-.shader-studio .export-card .export-actions .svg-upload-button { margin-top: 0; }
-.shader-studio .export-card .separate-files .text-action { margin-top: 0; }
-.shader-studio .export-card .code-format-select + .code-preview,
-.shader-studio .export-card .svg-select-control + .svg-upload-button { margin-top: 10px; }
 
 .gradient-bar {
   height: 24px;
@@ -178,7 +178,303 @@
   text-align: left;
 }
 
+/* ───────── header icons ───────── */
+
+.shader-studio .quiet-button svg { color: #a596d4; flex: 0 0 auto; }
+.shader-studio .export-button { position: relative; }
+.shader-studio .export-button svg { flex: 0 0 auto; }
+.rec-dot {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #ff6b86;
+  box-shadow: 0 0 0 2px #0c0e16, 0 0 10px #ff6b86;
+  animation: rec-pulse 1s ease-in-out infinite;
+}
+@keyframes rec-pulse { 50% { opacity: .35; } }
+
+/* small square icon button — used in the dock bar and the export sheet */
+.bar-icon {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  color: #aab0c0;
+  background: #171a25;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  cursor: pointer;
+  transition: color .15s, border-color .15s, background .15s;
+}
+.bar-icon:hover, .bar-icon:active { color: #eadfff; border-color: rgba(190, 163, 255, .45); background: #1d2030; }
+
+/* ───────── export sheet ───────── */
+
+.export-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  visibility: hidden;
+  pointer-events: none;
+  transition: visibility 0s linear .28s;
+}
+.export-layer.open { visibility: visible; pointer-events: auto; transition-delay: 0s; }
+
+.export-backdrop {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: rgba(5, 6, 11, .55);
+  opacity: 0;
+  cursor: default;
+  transition: opacity .28s ease;
+}
+.export-layer.open .export-backdrop { opacity: 1; }
+
+.export-sheet {
+  position: absolute;
+  left: 50%;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  width: min(520px, 100%);
+  max-height: min(78dvh, 660px);
+  padding-bottom: env(safe-area-inset-bottom);
+  color: #eeeff5;
+  background: #10131d;
+  border: 1px solid rgba(255, 255, 255, .1);
+  border-bottom: 0;
+  border-radius: 18px 18px 0 0;
+  box-shadow: 0 -16px 50px rgba(0, 0, 0, .45);
+  transform: translate(-50%, 104%);
+  transition: transform .3s cubic-bezier(.2, .8, .2, 1);
+}
+.export-layer.open .export-sheet { transform: translate(-50%, 0); }
+
+.export-sheet-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px 12px 8px 16px;
+}
+.export-sheet-title { min-width: 0; }
+.export-sheet-title b { display: block; font: 700 15px Manrope, sans-serif; letter-spacing: -.3px; }
+.export-sheet-title small {
+  display: block;
+  margin-top: 3px;
+  max-width: 60vw;
+  overflow: hidden;
+  color: #7c8293;
+  font: 10px "DM Mono", monospace;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.export-tabs {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 3px;
+  margin: 0 14px 6px;
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: #0d1019;
+}
+.export-tabs button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 0;
+  height: 32px;
+  padding: 0 4px;
+  color: #8d93a5;
+  background: transparent;
+  border: 0;
+  border-radius: 8px;
+  font: 700 11px Manrope, sans-serif;
+  cursor: pointer;
+  transition: background .2s, color .2s;
+}
+.export-tabs button:hover:not(.active) { color: #d2d5e1; }
+.export-tabs button.active { color: #e4d9ff; background: rgba(181, 154, 255, .16); }
+
+.export-sheet-body { padding: 6px 14px 16px; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: #303342 transparent; }
+.export-pane { display: grid; gap: 11px; animation: enter .2s ease-out; }
+.export-pane .field-help { margin: 0; }
+.export-pane .svg-select-control { margin: 0; font-size: 10px; }
+.export-pane .svg-select-control select { height: 36px; font-size: 11px; }
+.export-pane .svg-upload-button { min-height: 40px; margin-top: 0; font-size: 11px; }
+.export-pane .export-actions { margin-top: 0; }
+.export-pane .choice-control { margin: 0; }
+.export-pane .video-options { margin: 0; }
+.export-pane .record-progress { margin: 0; }
+.export-pane .code-preview { min-height: 104px; max-height: 26dvh; font-size: 9px; resize: none; }
+.export-pane .separate-files { padding: 0 2px; }
+.export-pane .text-action { margin-top: 0; }
+
+@media (min-width: 721px) {
+  .export-sheet {
+    bottom: auto;
+    top: 50%;
+    border-bottom: 1px solid rgba(255, 255, 255, .1);
+    border-radius: 16px;
+    opacity: 0;
+    transform: translate(-50%, -46%) scale(.97);
+    transition: transform .26s cubic-bezier(.2, .8, .2, 1), opacity .22s ease;
+  }
+  .export-layer.open .export-sheet { opacity: 1; transform: translate(-50%, -50%); }
+  .export-sheet-head { padding-top: 16px; }
+  .export-sheet-body { padding-bottom: 20px; }
+}
+
+/* ───────── phone layout: header · preview · dock ───────── */
+
 @media (max-width: 720px) {
+  /* The page is one flex column: slim header, a preview that takes whatever is left, and the dock. */
+  .shader-studio { display: flex; flex-direction: column; height: 100dvh; min-height: 0; }
+
+  /* one header row instead of two */
+  .shader-studio .topbar { flex: 0 0 52px; height: 52px; gap: 8px; padding: 0 10px; justify-content: flex-start; }
+  .shader-studio .topbar .brand { flex: 0 0 auto; gap: 0; }
+  .shader-studio .topbar .brand > span:last-child { display: none; }
+  .shader-studio .topbar .brand-mark { margin: 0 -1px 0 -2px; transform-origin: center; }
+  .shader-studio .mode-switch { margin: 0; padding: 2px; border-radius: 10px; }
+  .shader-studio .mode-switch button { width: 32px; height: 30px; padding: 0; justify-content: center; }
+  .shader-studio .mode-switch button span { font-size: 14px; }
+
+  .m-title { flex: 1 1 0; min-width: 0; display: grid; gap: 3px; }
+  .m-title .shader-name-input { width: 100%; min-width: 0; color: #eceaf6; font: 700 13px Manrope, sans-serif; letter-spacing: -.2px; text-overflow: ellipsis; }
+  .m-meta { display: flex; align-items: center; gap: 5px; overflow: hidden; color: #80d7ad; font: 9px "DM Mono", monospace; white-space: nowrap; }
+  .m-meta .live-dot { flex: 0 0 auto; width: 5px; height: 5px; }
+  .m-meta .m-res { color: #72798a; }
+  .m-meta .saved-badge { margin-left: 4px; color: #687083; font-size: 9px; }
+
+  .shader-studio .top-actions { flex: 0 0 auto; gap: 6px; }
+  .shader-studio .quiet-button,
+  .shader-studio .export-button { width: 36px; height: 36px; padding: 0; justify-content: center; border-radius: 10px; }
+  .shader-studio .quiet-button .desktop-label,
+  .shader-studio .export-button .desktop-label { display: none; }
+
+  /* workspace: preview on top, dock below — together they always fill the screen */
+  .shader-studio .workspace { flex: 1 1 0; display: flex; flex-direction: column; height: auto; min-height: 0; position: relative; }
+  .shader-studio .preview-area { flex: 1 1 0; height: auto; min-height: 0; padding: 4px 10px 8px; }
+  .shader-studio .canvas-wrap { border-radius: 14px; }
+  .shader-studio .canvas-caption { top: 9px; left: 9px; padding: 6px 9px; font-size: 8px; }
+
+  .canvas-tools { position: absolute; top: 8px; right: 8px; z-index: 2; display: flex; gap: 6px; }
+  .canvas-tool {
+    display: grid;
+    place-items: center;
+    width: 34px;
+    height: 34px;
+    padding: 0;
+    color: #e6e1f6;
+    background: rgba(12, 14, 22, .62);
+    border: 1px solid rgba(255, 255, 255, .14);
+    border-radius: 50%;
+    -webkit-backdrop-filter: blur(8px);
+    backdrop-filter: blur(8px);
+    cursor: pointer;
+  }
+  .canvas-tool:active { background: rgba(40, 34, 64, .8); }
+
+  /* the dock: share of the workspace set by --dock-frac (50% by default, draggable) */
+  .shader-studio .control-dock {
+    position: relative;
+    inset: auto;
+    flex: 0 0 auto;
+    height: calc((100dvh - 52px) * var(--dock-frac, .5));
+    overflow: hidden;
+    padding-bottom: env(safe-area-inset-bottom);
+    border: 1px solid rgba(255, 255, 255, .1);
+    border-bottom: 0;
+    border-radius: 18px 18px 0 0;
+    box-shadow: 0 -10px 34px rgba(0, 0, 0, .32);
+    transition: height .25s ease;
+  }
+  .shader-studio .control-dock.collapsed { height: calc(var(--bar-h) + env(safe-area-inset-bottom)); min-height: 0; }
+
+  .dock-bar {
+    position: relative;
+    flex: 0 0 var(--bar-h);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    height: var(--bar-h);
+    padding: 0 8px 0 14px;
+    cursor: grab;
+    touch-action: none;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  .dock-bar:active { cursor: grabbing; }
+  .dock-bar:focus-visible { outline-offset: -3px; }
+  .dock-bar-label {
+    display: block;
+    min-width: 0;
+    max-width: calc(50% - 40px);
+    overflow: hidden;
+    color: #9ca1b2;
+    font: 500 10px "DM Sans", sans-serif;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .dock-grip {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 38px;
+    height: 4px;
+    margin: -2px 0 0 -19px;
+    background: #4a4d5c;
+    border-radius: 4px;
+    pointer-events: none;
+    transition: background .15s, width .15s, margin .15s;
+  }
+  .dock-bar:hover .dock-grip,
+  .control-dock.dragging .dock-grip { width: 46px; margin-left: -23px; background: #8a7fc4; }
+  .dock-bar-actions { flex: 0 0 auto; display: flex; gap: 6px; }
+
+  .dock-body { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; border-top: 1px solid var(--line); }
+  .control-dock.collapsed:not(.dragging) .dock-body { visibility: hidden; }
+
+  .shader-studio .section-tabs { padding: 6px 8px; gap: 4px; scrollbar-width: none; }
+  .shader-studio .section-tabs::-webkit-scrollbar { display: none; }
+  .shader-studio .section-tab { flex: 0 0 62px; gap: 3px; padding: 6px 2px 5px; }
+  .shader-studio .tab-icon { height: 16px; font-size: 15px; }
+  .shader-studio .tab-hint { display: none; }
+  .shader-studio .control-scroll { padding: 10px 14px 16px; overscroll-behavior: contain; }
+  .shader-studio .range-control { margin: 12px 0; }
+  .shader-studio .range-title { margin-bottom: 8px; }
+
   .shader-studio .preset-swatch { height: 46px; }
   .shader-name-input { width: min(220px, 52vw); }
+  .shader-studio .toast { bottom: auto; top: calc(60px + env(safe-area-inset-top)); }
+
+  /* export sheet: a bottom sheet that leaves the preview visible above it */
+  .export-sheet { max-height: 58dvh; }
+  .export-backdrop { background: rgba(5, 6, 11, .3); }
+  .export-sheet-title small { max-width: 52vw; }
+}
+
+@media (max-width: 380px) {
+  .shader-studio .topbar { gap: 6px; padding: 0 8px; }
+  .shader-studio .mode-switch button { width: 30px; }
+  .shader-studio .quiet-button,
+  .shader-studio .export-button { width: 34px; }
+  .shader-studio .preview-area { padding-left: 8px; padding-right: 8px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .export-layer, .export-backdrop, .export-sheet, .shader-studio .control-dock { transition-duration: .01ms !important; }
+  .rec-dot { animation: none; }
 }
