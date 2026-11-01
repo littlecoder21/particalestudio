@@ -233,12 +233,16 @@ export class ShaderRenderer {
     const dpr = Math.min(window.devicePixelRatio || 1, MAX_DPR) * this.quality;
     const w = Math.max(2, Math.floor(rect.width * dpr));
     const h = Math.max(2, Math.floor(rect.height * dpr));
+    let changed = false;
     if (this.canvas.width !== w || this.canvas.height !== h) {
       this.canvas.width = w;
       this.canvas.height = h;
+      changed = true;
     }
     gl.viewport(0, 0, this.canvas.width, this.canvas.height);
-    if (!this.running) this.draw();
+    // Resizing clears the drawing buffer, so repaint straight away — otherwise
+    // dragging the preview/panel divider would flash a blank frame on every step.
+    if (changed || !this.running) this.draw();
   }
 
   /** Fixed-size mode for thumbnails and exports. */
