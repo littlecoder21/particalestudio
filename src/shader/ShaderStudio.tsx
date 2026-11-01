@@ -1,11 +1,14 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
   useSyncExternalStore,
   type CSSProperties,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from "react";
 import {
@@ -16,15 +19,18 @@ import {
   SoftTip,
   ToggleRow,
 } from "./controls";
-import {
-  EXPORT_FORMATS,
-  buildProjectZip,
-  extractProject,
-  generateShaderCode,
-  slugify,
-  type ExportFormatId,
-} from "./exporter";
+import ExportSheet from "./ExportSheet";
 import { GENERATORS, GENERATOR_MAP, defaultKnobs } from "./generators";
+import {
+  IconChevronDown,
+  IconChevronUp,
+  IconExport,
+  IconFullscreen,
+  IconPause,
+  IconPlay,
+  IconReset,
+  IconSave,
+} from "./icons";
 import { PALETTE_LIBRARY, SHADER_PRESETS } from "./presets";
 import { DEFAULT_PROJECT, cloneProject, normalizeProject, randomPalette, randomProject } from "./project";
 import { ShaderRenderer, type RendererStats } from "./renderer";
@@ -47,7 +53,7 @@ import {
 
 /* ───────────────────────── constants ───────────────────────── */
 
-type SectionId = "presets" | "field" | "layers" | "motion" | "color" | "surface" | "effects" | "touch" | "export";
+type SectionId = "presets" | "field" | "layers" | "motion" | "color" | "surface" | "effects" | "touch";
 
 const SECTIONS: Array<{ id: SectionId; icon: string; label: string; hint: string; title: string; description: string }> = [
   { id: "presets", icon: "✦", label: "Presets", hint: `${SHADER_PRESETS.length} looks`, title: "Ready-made looks", description: "Start from a finished shader, then make it yours." },
@@ -58,21 +64,47 @@ const SECTIONS: Array<{ id: SectionId; icon: string; label: string; hint: string
   { id: "surface", icon: "◈", label: "Surface", hint: "Light", title: "Light & relief", description: "Turn the field into a lit, glossy surface." },
   { id: "effects", icon: "✧", label: "Effects", hint: "Post FX", title: "Post effects", description: "Lens, film and retro finishing touches." },
   { id: "touch", icon: "⌖", label: "Touch", hint: "Pointer", title: "Pointer & ripples", description: "How the shader reacts to your cursor." },
-  { id: "export", icon: "⇪", label: "Export", hint: "Code & media", title: "Export", description: "Code, project files, images and video." },
 ];
 
 const CATEGORY_ICON: Record<GeneratorCategory, string> = { Fluid: "≈", Cosmic: "✺", Light: "☀", Pattern: "▦" };
 
-const IMAGE_SIZES = [
-  { id: "preview", label: "Preview size", w: 0, h: 0 },
-  { id: "720", label: "1280 × 720", w: 1280, h: 720 },
-  { id: "1080", label: "1920 × 1080", w: 1920, h: 1080 },
-  { id: "1440", label: "2560 × 1440", w: 2560, h: 1440 },
-  { id: "4k", label: "3840 × 2160", w: 3840, h: 2160 },
-] as const;
-type ImageSizeId = (typeof IMAGE_SIZES)[number]["id"];
-
 const STORAGE_KEY = "particle-studio-shader-project";
+
+/* Mobile split view: the control dock takes a share of the workspace, the preview gets the rest. */
+const DOCK_KEY = "particle-studio-shader-dock";
+const DOCK_DEFAULT = 0.5;
+const DOCK_MIN = 0.28;
+const DOCK_MAX = 0.8;
+/** Height of the dock's drag bar in px — keep in sync with --bar-h in shader.css. */
+const BAR_H = 40;
+/** Releasing the drag below this height (px) folds the dock away. */
+const CLOSE_BELOW = 110;
+
+const MOBILE_QUERY = "(max-width: 720px)";
+
+const clamp = (value: number, min: number, max: number): number => Math.min(max, Math.max(min, value));
+
+function loadDock(): number {
+  try {
+    const value = Number(localStorage.getItem(DOCK_KEY));
+    return value >= DOCK_MIN && value <= DOCK_MAX ? value : DOCK_DEFAULT;
+  } catch {
+    return DOCK_DEFAULT;
+  }
+}
+
+function subscribeMobile(notify: () => void): () => void {
+  if (typeof matchMedia !== "function") return () => undefined;
+  const query = matchMedia(MOBILE_QUERY);
+  query.addEventListener("change", notify);
+  return () => query.removeEventListener("change", notify);
+}
+
+const getMobile = (): boolean => typeof matchMedia === "function" && matchMedia(MOBILE_QUERY).matches;
+
+function useMobile(): boolean {
+  return useSyncExternalStore(subscribeMobile, getMobile, () => false);
+}
 
 interface SavedShader {
   project: ShaderProject;
@@ -90,21 +122,16 @@ function loadSaved(): SavedShader | null {
   }
 }
 
-function downloadBlob(blob: Blob, filename: string): void {
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = filename;
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  window.setTimeout(() => URL.revokeObjectURL(url), 1500);
+interface DockDrag {
+  id: number;
+  startY: number;
+  /** dock top minus pointer Y at grab time, so the dock edge follows the finger exactly */
+  offset: number;
+  wsH: number;
+  wsBottom: number;
+  h: number;
+  moved: boolean;
 }
-
-const downloadText = (text: string, filename: string, mime: string): void =>
-  downloadBlob(new Blob([text], { type: mime }), filename);
-
-const isMobile = (): boolean => typeof matchMedia === "function" && matchMedia("(max-width: 720px)").matches;
 
 /* ───────────────────────── small components ───────────────────────── */
 
@@ -182,32 +209,32 @@ interface ShaderStudioProps {
 
 export default function ShaderStudio({ active, modeSwitch }: ShaderStudioProps) {
   const saved = useMemo(() => loadSaved(), []);
+  const mobile = useMobile();
   const [project, setProject] = useState<ShaderProject>(
     () => saved?.project ?? cloneProject(SHADER_PRESETS[0]?.project ?? DEFAULT_PROJECT),
   );
   const [activePreset, setActivePreset] = useState<string>(saved ? saved.preset : (SHADER_PRESETS[0]?.name ?? ""));
   const [section, setSection] = useState<SectionId>("presets");
-  const [collapsed, setCollapsed] = useState<boolean>(isMobile);
+  const [collapsed, setCollapsed] = useState(false);
+  const [dockFrac, setDockFrac] = useState<number>(loadDock);
+  const [settle, setSettle] = useState(0);
   const [isSaved, setIsSaved] = useState<boolean>(saved !== null);
   const [query, setQuery] = useState("");
   const [toast, setToast] = useState<string | null>(null);
   const [stats, setStats] = useState<RendererStats>({ fps: 60, quality: 1 });
   const [error, setError] = useState<string | null>(null);
   const [supported, setSupported] = useState(true);
-  const [codeFormat, setCodeFormat] = useState<ExportFormatId>("standaloneHtml");
-  const [imageSize, setImageSize] = useState<ImageSizeId>("1080");
-  const [videoSeconds, setVideoSeconds] = useState(6);
-  const [videoFps, setVideoFps] = useState(60);
+  const [exportOpen, setExportOpen] = useState(false);
   const [recording, setRecording] = useState(false);
-  const [progress, setProgress] = useState(0);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
+  const workspaceRef = useRef<HTMLElement>(null);
+  const dockRef = useRef<HTMLElement>(null);
+  const dragRef = useRef<DockDrag | null>(null);
   const rendererRef = useRef<ShaderRenderer | null>(null);
   const projectRef = useRef(project);
-  const recorderRef = useRef<MediaRecorder | null>(null);
   const toastTimer = useRef(0);
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const showToast = useCallback((message: string) => {
     setToast(message);
@@ -253,13 +280,93 @@ export default function ShaderStudio({ active, modeSwitch }: ShaderStudioProps) 
     thumbStore.setPaused(recording || !active);
   }, [recording, active]);
 
-  useEffect(
-    () => () => {
-      window.clearTimeout(toastTimer.current);
-      if (recorderRef.current && recorderRef.current.state !== "inactive") recorderRef.current.stop();
-    },
-    [],
-  );
+  useEffect(() => () => window.clearTimeout(toastTimer.current), []);
+
+  /* ───────── dock: resizable split between preview and controls ───────── */
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(DOCK_KEY, String(dockFrac));
+    } catch {
+      /* storage can be unavailable in private windows */
+    }
+  }, [dockFrac]);
+
+  /* a drag writes the height straight onto the element; hand control back to CSS once state has settled */
+  useLayoutEffect(() => {
+    const dock = dockRef.current;
+    if (!dock) return;
+    dock.style.height = "";
+    dock.style.transition = "";
+    dock.classList.remove("dragging");
+  }, [collapsed, dockFrac, settle]);
+
+  const onBarPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if ((event.target as HTMLElement).closest("button")) return;
+    const workspace = workspaceRef.current;
+    const dock = dockRef.current;
+    if (!workspace || !dock) return;
+    const ws = workspace.getBoundingClientRect();
+    const dr = dock.getBoundingClientRect();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    dragRef.current = {
+      id: event.pointerId,
+      startY: event.clientY,
+      offset: dr.top - event.clientY,
+      wsH: ws.height,
+      wsBottom: ws.bottom,
+      h: dr.height,
+      moved: false,
+    };
+  };
+
+  const onBarPointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const drag = dragRef.current;
+    const dock = dockRef.current;
+    if (!drag || !dock || drag.id !== event.pointerId) return;
+    if (!drag.moved) {
+      if (Math.abs(event.clientY - drag.startY) < 6) return;
+      drag.moved = true;
+      dock.classList.add("dragging");
+      dock.style.transition = "none";
+    }
+    drag.h = clamp(drag.wsBottom - (event.clientY + drag.offset), BAR_H, drag.wsH * DOCK_MAX);
+    dock.style.height = `${drag.h}px`;
+  };
+
+  const finishDrag = (event: ReactPointerEvent<HTMLDivElement>, cancelled: boolean) => {
+    const drag = dragRef.current;
+    if (!drag || drag.id !== event.pointerId) return;
+    dragRef.current = null;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+    if (!drag.moved) {
+      if (!cancelled) setCollapsed((value) => !value);
+      return;
+    }
+    if (drag.h < CLOSE_BELOW) {
+      setCollapsed(true);
+    } else {
+      setCollapsed(false);
+      setDockFrac(clamp(drag.h / drag.wsH, DOCK_MIN, DOCK_MAX));
+    }
+    setSettle((value) => value + 1);
+  };
+
+  const onBarKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (event.target !== event.currentTarget) return;
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      setCollapsed((value) => !value);
+    } else if (event.key === "ArrowUp" || event.key === "ArrowDown") {
+      event.preventDefault();
+      const step = event.key === "ArrowUp" ? 0.06 : -0.06;
+      if (collapsed) {
+        if (step > 0) setCollapsed(false);
+        return;
+      }
+      setDockFrac((value) => clamp(value + step, DOCK_MIN, DOCK_MAX));
+    }
+  };
 
   /* ───────── project updates ───────── */
 
@@ -350,81 +457,6 @@ export default function ShaderStudio({ active, modeSwitch }: ShaderStudioProps) 
     showToast("Fresh random shader");
   };
 
-  const copyCode = async (text: string) => {
-    try {
-      await navigator.clipboard.writeText(text);
-      showToast("Copied to clipboard");
-    } catch {
-      showToast("Copy failed — select the code and copy manually");
-    }
-  };
-
-  const loadFile = async (file: File | undefined) => {
-    if (!file) return;
-    try {
-      const next = normalizeProject(extractProject(await file.text()));
-      applyProject(next, "");
-      showToast(`Loaded ${next.name}`);
-    } catch {
-      showToast("That file isn't a Shader Studio project");
-    }
-  };
-
-  const exportImage = async () => {
-    const renderer = rendererRef.current;
-    if (!renderer) return;
-    const size = IMAGE_SIZES.find((s) => s.id === imageSize) ?? IMAGE_SIZES[0];
-    const w = size.w || renderer.canvas.width;
-    const h = size.h || renderer.canvas.height;
-    const blob = await renderer.snapshot(w, h);
-    if (!blob) {
-      showToast("Couldn't render the image");
-      return;
-    }
-    downloadBlob(blob, `${slugify(project.name)}-${w}x${h}.png`);
-    showToast(`PNG saved · ${w} × ${h}`);
-  };
-
-  const stopRecording = () => {
-    if (recorderRef.current && recorderRef.current.state !== "inactive") recorderRef.current.stop();
-  };
-
-  const startRecording = () => {
-    const canvas = canvasRef.current;
-    if (!canvas || typeof MediaRecorder === "undefined" || typeof canvas.captureStream !== "function") {
-      showToast("Video recording isn't supported in this browser");
-      return;
-    }
-    const stream = canvas.captureStream(videoFps);
-    const mimeType = ["video/webm;codecs=vp9", "video/webm;codecs=vp8", "video/webm"].find((type) =>
-      MediaRecorder.isTypeSupported(type),
-    );
-    const recorder = new MediaRecorder(stream, mimeType ? { mimeType, videoBitsPerSecond: 12_000_000 } : undefined);
-    const chunks: Blob[] = [];
-    const started = performance.now();
-    const timer = window.setInterval(() => {
-      const ratio = (performance.now() - started) / (videoSeconds * 1000);
-      setProgress(Math.min(1, ratio));
-      if (ratio >= 1 && recorder.state !== "inactive") recorder.stop();
-    }, 100);
-    recorder.ondataavailable = (event) => {
-      if (event.data.size > 0) chunks.push(event.data);
-    };
-    recorder.onstop = () => {
-      window.clearInterval(timer);
-      stream.getTracks().forEach((track) => track.stop());
-      setRecording(false);
-      setProgress(0);
-      if (chunks.length > 0) {
-        downloadBlob(new Blob(chunks, { type: "video/webm" }), `${slugify(project.name)}.webm`);
-        showToast("WebM video saved");
-      }
-    };
-    recorder.start(250);
-    recorderRef.current = recorder;
-    setRecording(true);
-  };
-
   const goFullscreen = () => {
     void wrapRef.current?.requestFullscreen?.().catch(() => showToast("Fullscreen isn't available"));
   };
@@ -437,16 +469,11 @@ export default function ShaderStudio({ active, modeSwitch }: ShaderStudioProps) 
     return q ? SHADER_PRESETS.filter((p) => `${p.name} ${p.tag} ${p.project.generator}`.toLowerCase().includes(q)) : SHADER_PRESETS;
   }, [query]);
 
-  const code = useMemo(
-    () => (active && section === "export" ? generateShaderCode(project) : null),
-    [active, section, project],
-  );
-  const currentFormat = EXPORT_FORMATS.find((f) => f.id === codeFormat) ?? EXPORT_FORMATS[0];
-  const currentCode = code ? code[codeFormat] : "";
   const sectionMeta = SECTIONS.find((s) => s.id === section) ?? SECTIONS[0];
   const gradient = `linear-gradient(90deg, ${project.palette.join(", ")})`;
   const canvasW = canvasRef.current?.width ?? 0;
   const canvasH = canvasRef.current?.height ?? 0;
+  const generatorLabel = `${generator.name}${project.overlay.enabled ? ` + ${GENERATOR_MAP[project.overlay.generator].name}` : ""}`;
 
   /* ───────── panels ───────── */
 
@@ -692,163 +719,56 @@ export default function ShaderStudio({ active, modeSwitch }: ShaderStudioProps) 
             </div>
           </>
         );
-
-      case "export":
-        return (
-          <>
-            <div className="export-card">
-              <div className="export-card-heading">
-                <b>Code</b>
-                <small>Runs anywhere WebGL2 does. The shader and every setting are embedded.</small>
-              </div>
-              <label className="svg-select-control code-format-select">
-                Format
-                <select value={codeFormat} onChange={(event) => setCodeFormat(event.target.value as ExportFormatId)}>
-                  {EXPORT_FORMATS.map((f) => (
-                    <option key={f.id} value={f.id}>
-                      {f.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <textarea className="code-preview" readOnly spellCheck={false} value={currentCode} aria-label="Generated code" />
-              <div className="export-actions">
-                <button type="button" className="svg-upload-button" onClick={() => void copyCode(currentCode)}>
-                  Copy
-                </button>
-                <button
-                  type="button"
-                  className="svg-upload-button"
-                  onClick={() => {
-                    downloadText(currentCode, currentFormat.file, currentFormat.mime);
-                    showToast(`${currentFormat.file} downloaded`);
-                  }}
-                >
-                  Download
-                </button>
-              </div>
-              <button
-                type="button"
-                className="svg-upload-button"
-                onClick={() => {
-                  downloadBlob(buildProjectZip(project), `${slugify(project.name)}.zip`);
-                  showToast("ZIP downloaded");
-                }}
-              >
-                <span>⇪</span> Download ZIP (HTML · CSS · JS · GLSL · React)
-              </button>
-              <div className="export-actions separate-files">
-                {EXPORT_FORMATS.filter((f) => f.id !== "standaloneHtml").map((f) => (
-                  <button
-                    key={f.id}
-                    type="button"
-                    className="text-action"
-                    onClick={() => {
-                      if (!code) return;
-                      downloadText(code[f.id], f.file, f.mime);
-                      showToast(`${f.file} downloaded`);
-                    }}
-                  >
-                    {f.file}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div className="export-card">
-              <div className="export-card-heading">
-                <b>Project file</b>
-                <small>Save the full project as JSON and load it back any time.</small>
-              </div>
-              <div className="export-actions">
-                <button
-                  type="button"
-                  className="svg-upload-button"
-                  onClick={() => {
-                    downloadText(generateShaderCode(project).json, `${slugify(project.name)}.json`, "application/json");
-                    showToast("Project JSON downloaded");
-                  }}
-                >
-                  Save JSON
-                </button>
-                <button type="button" className="svg-upload-button" onClick={() => fileInputRef.current?.click()}>
-                  Load JSON
-                </button>
-              </div>
-              <input
-                ref={fileInputRef}
-                className="visually-hidden"
-                type="file"
-                accept=".json,application/json"
-                onChange={(event) => {
-                  void loadFile(event.target.files?.[0]);
-                  event.target.value = "";
-                }}
-              />
-            </div>
-
-            <div className="export-card">
-              <div className="export-card-heading">
-                <b>Image</b>
-                <small>Renders the current frame at full resolution, independent of your screen.</small>
-              </div>
-              <label className="svg-select-control code-format-select">
-                Size
-                <select value={imageSize} onChange={(event) => setImageSize(event.target.value as ImageSizeId)}>
-                  {IMAGE_SIZES.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <button type="button" className="svg-upload-button" onClick={() => void exportImage()}>
-                Download PNG
-              </button>
-            </div>
-
-            <div className="export-card">
-              <div className="export-card-heading">
-                <b>Video</b>
-                <small>Records the live canvas to a WebM file.</small>
-              </div>
-              <div className="video-options">
-                <label className="svg-select-control">
-                  Length
-                  <select value={videoSeconds} onChange={(event) => setVideoSeconds(Number(event.target.value))} disabled={recording}>
-                    {[3, 6, 10, 15].map((s) => (
-                      <option key={s} value={s}>
-                        {s} seconds
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className="svg-select-control">
-                  Frame rate
-                  <select value={videoFps} onChange={(event) => setVideoFps(Number(event.target.value))} disabled={recording}>
-                    <option value={30}>30 fps</option>
-                    <option value={60}>60 fps</option>
-                  </select>
-                </label>
-              </div>
-              {recording && (
-                <div className="record-progress">
-                  <i style={{ width: `${Math.round(progress * 100)}%` }} />
-                </div>
-              )}
-              <button type="button" className={`svg-upload-button ${recording ? "recording-button" : ""}`} onClick={recording ? stopRecording : startRecording}>
-                {recording ? "■ Stop & save" : "● Record WebM"}
-              </button>
-            </div>
-          </>
-        );
     }
   };
+
+  /* ───────── layout pieces ───────── */
+
+  const tabs = (
+    <nav className="section-tabs" aria-label="Shader controls">
+      {SECTIONS.map((s) => (
+        <button
+          key={s.id}
+          type="button"
+          className={`section-tab ${s.id === section ? "active" : ""}`}
+          aria-current={s.id === section ? "page" : undefined}
+          onClick={() => setSection(s.id)}
+        >
+          <span className="tab-icon">{s.icon}</span>
+          <span className="tab-label">{s.label}</span>
+          <span className="tab-hint">{s.hint}</span>
+        </button>
+      ))}
+    </nav>
+  );
+
+  const scroller = (
+    <div className="control-scroll" key={section}>
+      {!mobile && (
+        <SectionHeading
+          number={String(SECTIONS.findIndex((s) => s.id === section) + 1).padStart(2, "0")}
+          title={sectionMeta.title}
+          description={sectionMeta.description}
+        />
+      )}
+      {renderSection()}
+    </div>
+  );
+
+  const nameInput = (
+    <input
+      className="shader-name-input"
+      value={project.name}
+      maxLength={60}
+      aria-label="Shader name"
+      onChange={(event) => update("name", event.target.value)}
+    />
+  );
 
   /* ───────── layout ───────── */
 
   return (
-    <div className="studio shader-studio">
+    <div className={`studio shader-studio ${mobile ? "is-mobile" : ""}`}>
       <header className="topbar">
         <span className="brand">
           <span className="brand-mark" aria-hidden="true">
@@ -863,71 +783,98 @@ export default function ShaderStudio({ active, modeSwitch }: ShaderStudioProps) 
           </span>
         </span>
         {modeSwitch}
-        <div className="project-title">
-          <span className="live-dot" />
-          {project.name}
-          <span className="saved-badge">{isSaved ? "Saved" : "Draft"}</span>
-        </div>
+        {mobile ? (
+          <div className="m-title">
+            {nameInput}
+            <span className="m-meta">
+              <i className="live-dot" />
+              {stats.fps} fps
+              {stats.quality < 0.99 && <span className="m-res">· {Math.round(stats.quality * 100)}%</span>}
+              <span className="saved-badge">{isSaved ? "Saved" : "Draft"}</span>
+            </span>
+          </div>
+        ) : (
+          <div className="project-title">
+            <span className="live-dot" />
+            {project.name}
+            <span className="saved-badge">{isSaved ? "Saved" : "Draft"}</span>
+          </div>
+        )}
         <div className="top-actions">
-          <button type="button" className="quiet-button" onClick={save} aria-label="Save shader">
-            <span>▣</span>
+          <button type="button" className="quiet-button" onClick={save} aria-label="Save shader" title="Save">
+            <IconSave size={16} />
             <span className="desktop-label">Save</span>
           </button>
-          <button
-            type="button"
-            className="export-button"
-            onClick={() => {
-              setSection("export");
-              setCollapsed(false);
-            }}
-          >
-            <span>↥</span> Export
+          <button type="button" className="export-button" onClick={() => setExportOpen(true)} aria-label="Export" title="Export">
+            <IconExport size={16} />
+            <span className="desktop-label">Export</span>
+            {recording && <i className="rec-dot" aria-hidden="true" />}
           </button>
         </div>
       </header>
 
-      <main className="workspace">
+      <main
+        className="workspace"
+        ref={workspaceRef}
+        style={{ "--dock-frac": dockFrac } as CSSProperties}
+      >
         <section className="preview-area">
-          <div className="preview-head">
-            <div>
-              <span className="eyebrow">LIVE SHADER</span>
-              <span className="canvas-name">
-                <input
-                  className="shader-name-input"
-                  value={project.name}
-                  maxLength={60}
-                  aria-label="Shader name"
-                  onChange={(event) => update("name", event.target.value)}
-                />
-                <span className="edit-pencil">✎</span>
-              </span>
+          {!mobile && (
+            <div className="preview-head">
+              <div>
+                <span className="eyebrow">LIVE SHADER</span>
+                <span className="canvas-name">
+                  {nameInput}
+                  <span className="edit-pencil">✎</span>
+                </span>
+              </div>
+              <div className="preview-tools">
+                <span className="performance">
+                  <i />
+                  {stats.fps} fps
+                  {stats.quality < 0.99 && <span> · {Math.round(stats.quality * 100)}% res</span>}
+                </span>
+                <button
+                  type="button"
+                  className="icon-button"
+                  aria-label={project.playing ? "Pause animation" : "Play animation"}
+                  onClick={() => update("playing", !project.playing)}
+                >
+                  {project.playing ? "Ⅱ" : "▶"}
+                </button>
+                <button type="button" className="icon-button" aria-label="Fullscreen preview" onClick={goFullscreen}>
+                  ⛶
+                </button>
+              </div>
             </div>
-            <div className="preview-tools">
-              <span className="performance">
-                <i />
-                {stats.fps} fps
-                {stats.quality < 0.99 && <span> · {Math.round(stats.quality * 100)}% res</span>}
-              </span>
-              <button
-                type="button"
-                className="icon-button"
-                aria-label={project.playing ? "Pause animation" : "Play animation"}
-                onClick={() => update("playing", !project.playing)}
-              >
-                {project.playing ? "Ⅱ" : "▶"}
-              </button>
-              <button type="button" className="icon-button" aria-label="Fullscreen preview" onClick={goFullscreen}>
-                ⛶
-              </button>
-            </div>
-          </div>
+          )}
 
           <div className="canvas-wrap" ref={wrapRef}>
             <canvas ref={canvasRef} aria-label={`${generator.name} shader preview`} />
             <div className="canvas-caption">
               <i className="pulse-dot" />
-              LIVE SHADER <span className="caption-divider">|</span> {generator.name.toUpperCase()}
+              {!mobile && (
+                <>
+                  LIVE SHADER <span className="caption-divider">|</span>{" "}
+                </>
+              )}
+              {generator.name.toUpperCase()}
             </div>
+            {mobile && (
+              <div className="canvas-tools">
+                <button
+                  type="button"
+                  className="canvas-tool"
+                  aria-label={project.playing ? "Pause animation" : "Play animation"}
+                  onClick={() => update("playing", !project.playing)}
+                >
+                  {project.playing ? <IconPause size={14} /> : <IconPlay size={14} />}
+                </button>
+                <button type="button" className="canvas-tool" aria-label="Fullscreen preview" onClick={goFullscreen}>
+                  <IconFullscreen size={15} />
+                </button>
+              </div>
+            )}
             {error && (
               <pre className="shader-error" role="alert">
                 {error.slice(0, 700)}
@@ -941,92 +888,116 @@ export default function ShaderStudio({ active, modeSwitch }: ShaderStudioProps) 
             )}
           </div>
 
-          <div className="preview-footer">
-            <span>
-              <kbd>✦</kbd>
-              Move over the canvas to play · press for ripples
-            </span>
-            <span className="preview-dimensions">
-              {canvasW} × {canvasH}
-              <i />
-              WEBGL2
-            </span>
-          </div>
+          {!mobile && (
+            <div className="preview-footer">
+              <span>
+                <kbd>✦</kbd>
+                Move over the canvas to play · press for ripples
+              </span>
+              <span className="preview-dimensions">
+                {canvasW} × {canvasH}
+                <i />
+                WEBGL2
+              </span>
+            </div>
+          )}
         </section>
 
-        <button
-          type="button"
-          className={`collapse-floating ${collapsed ? "" : "menu-open"}`}
-          onClick={() => setCollapsed((value) => !value)}
-        >
-          <span>{collapsed ? "✦" : "⌄"}</span>
-          {collapsed ? "Customize" : "Hide"}
-        </button>
-
-        <aside className={`control-dock ${collapsed ? "collapsed" : ""}`}>
-          <div className="dock-handle" role="button" tabIndex={0} aria-label="Toggle controls" onClick={() => setCollapsed((value) => !value)}>
-            <span />
-          </div>
-          <div className="dock-topline">
-            <div>
-              <span className="eyebrow">SHADER STUDIO</span>
-              <h1>
-                Make it <span>glow.</span>
-              </h1>
-            </div>
-            <button type="button" className="collapse-button" aria-label={collapsed ? "Expand controls" : "Collapse controls"} onClick={() => setCollapsed((value) => !value)}>
-              {collapsed ? "‹" : "›"}
-            </button>
-          </div>
-
-          {collapsed ? (
-            <button type="button" className="collapsed-summary" onClick={() => setCollapsed(false)}>
-              <span className="summary-sparkle">✦</span>
-              <span>
-                <b>{project.name}</b>
-                <small>{generator.name} · tap to customize</small>
-              </span>
-              <span className="summary-arrow">‹</span>
-            </button>
+        <aside className={`control-dock ${collapsed ? "collapsed" : ""}`} ref={dockRef}>
+          {mobile ? (
+            <>
+              <div
+                className="dock-bar"
+                role="group"
+                aria-label="Controls panel — drag to resize, tap to fold"
+                tabIndex={0}
+                onPointerDown={onBarPointerDown}
+                onPointerMove={onBarPointerMove}
+                onPointerUp={(event) => finishDrag(event, false)}
+                onPointerCancel={(event) => finishDrag(event, true)}
+                onKeyDown={onBarKeyDown}
+              >
+                <span className="dock-bar-label">
+                  <span className="sparkle">✦</span>
+                  {generatorLabel}
+                </span>
+                <span className="dock-grip" aria-hidden="true" />
+                <span className="dock-bar-actions">
+                  <button type="button" className="bar-icon" aria-label="Reset to preset" title="Reset" onClick={reset}>
+                    <IconReset size={15} />
+                  </button>
+                  <button
+                    type="button"
+                    className="bar-icon"
+                    aria-label={collapsed ? "Show controls" : "Hide controls"}
+                    title={collapsed ? "Show" : "Hide"}
+                    onClick={() => setCollapsed((value) => !value)}
+                  >
+                    {collapsed ? <IconChevronUp size={16} /> : <IconChevronDown size={16} />}
+                  </button>
+                </span>
+              </div>
+              <div className="dock-body" aria-hidden={collapsed}>
+                {tabs}
+                {scroller}
+              </div>
+            </>
           ) : (
             <>
-              <nav className="section-tabs" aria-label="Shader controls">
-                {SECTIONS.map((s) => (
-                  <button
-                    key={s.id}
-                    type="button"
-                    className={`section-tab ${s.id === section ? "active" : ""}`}
-                    aria-current={s.id === section ? "page" : undefined}
-                    onClick={() => setSection(s.id)}
-                  >
-                    <span className="tab-icon">{s.icon}</span>
-                    <span className="tab-label">{s.label}</span>
-                    <span className="tab-hint">{s.hint}</span>
-                  </button>
-                ))}
-              </nav>
-              <div className="control-scroll" key={section}>
-                <SectionHeading
-                  number={String(SECTIONS.findIndex((s) => s.id === section) + 1).padStart(2, "0")}
-                  title={sectionMeta.title}
-                  description={sectionMeta.description}
-                />
-                {renderSection()}
-              </div>
-              <footer className="dock-footer">
-                <span>
-                  <span className="sparkle">✦</span>
-                  {generator.name}
-                  {project.overlay.enabled ? ` + ${GENERATOR_MAP[project.overlay.generator].name}` : ""}
-                </span>
-                <button type="button" onClick={reset}>
-                  Reset <span>↺</span>
+              <div className="dock-topline">
+                <div>
+                  <span className="eyebrow">SHADER STUDIO</span>
+                  <h1>
+                    Make it <span>glow.</span>
+                  </h1>
+                </div>
+                <button type="button" className="collapse-button" aria-label={collapsed ? "Expand controls" : "Collapse controls"} onClick={() => setCollapsed((value) => !value)}>
+                  {collapsed ? "‹" : "›"}
                 </button>
-              </footer>
+              </div>
+
+              {collapsed ? (
+                <button type="button" className="collapsed-summary" onClick={() => setCollapsed(false)}>
+                  <span className="summary-sparkle">✦</span>
+                  <span>
+                    <b>{project.name}</b>
+                    <small>{generator.name} · tap to customize</small>
+                  </span>
+                  <span className="summary-arrow">‹</span>
+                </button>
+              ) : (
+                <>
+                  {tabs}
+                  {scroller}
+                  <footer className="dock-footer">
+                    <span>
+                      <span className="sparkle">✦</span>
+                      {generatorLabel}
+                    </span>
+                    <button type="button" onClick={reset}>
+                      Reset <span>↺</span>
+                    </button>
+                  </footer>
+                </>
+              )}
             </>
           )}
         </aside>
       </main>
+
+      <ExportSheet
+        open={exportOpen}
+        project={project}
+        canvasRef={canvasRef}
+        rendererRef={rendererRef}
+        onClose={() => setExportOpen(false)}
+        onLoadProject={(next) => {
+          applyProject(next, "");
+          showToast(`Loaded ${next.name}`);
+        }}
+        onRecordingChange={setRecording}
+        showToast={showToast}
+      />
 
       {toast && (
         <div className="toast" role="status">
