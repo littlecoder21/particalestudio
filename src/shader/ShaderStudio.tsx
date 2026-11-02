@@ -11,16 +11,17 @@ import {
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from "react";
+import "./panels.css";
 import {
   ChoiceGroup,
   ColorField,
   RangeControl,
   SectionHeading,
   SoftTip,
-  ToggleRow,
 } from "./controls";
 import ExportSheet from "./ExportSheet";
 import { GENERATORS, GENERATOR_MAP, defaultKnobs } from "./generators";
+import GradientBar from "./GradientBar";
 import {
   IconChevronDown,
   IconChevronUp,
@@ -31,14 +32,24 @@ import {
   IconReset,
   IconSave,
 } from "./icons";
+import { libraryLayers, type LibraryItem } from "./library";
+import LibraryPanel, { type InsertAt } from "./LibraryPanel";
+import { applyLook } from "./looks";
+import { importMaskFile, maskPixelsFor, sourceField, type MaskPixels } from "./mask";
+import MaskPanel from "./MaskPanel";
 import { PALETTE_LIBRARY, SHADER_PRESETS } from "./presets";
 import { DEFAULT_PROJECT, cloneProject, normalizeProject, randomPalette, randomProject } from "./project";
 import { ShaderRenderer, type RendererStats } from "./renderer";
-import { thumbStore } from "./thumbs";
+import { newLayer } from "./stack";
+import StackPanel from "./StackPanel";
+import { evenPositions } from "./stops";
+import TextPanel from "./TextPanel";
+import { presetThumbKey, thumbStore } from "./thumbs";
+import TouchPanel from "./TouchPanel";
+import { useThumb } from "./useThumb";
 import {
-  BLEND_MODES,
   GENERATOR_CATEGORIES,
-  INTERACTION_MODES,
+  MAX_LAYERS,
   MAX_PALETTE,
   MIN_PALETTE,
   RANGES,
@@ -46,27 +57,31 @@ import {
   type GeneratorId,
   type Knobs,
   type RangeKey,
-  type ShaderOverlay,
+  type ShaderLayer,
+  type ShaderMask,
   type ShaderPreset,
   type ShaderProject,
 } from "./types";
 
 /* ───────────────────────── constants ───────────────────────── */
 
-type SectionId = "presets" | "field" | "layers" | "motion" | "color" | "surface" | "effects" | "touch";
+type SectionId = "presets" | "field" | "stack" | "elements" | "text" | "mask" | "motion" | "color" | "surface" | "effects" | "touch";
 
 const SECTIONS: Array<{ id: SectionId; icon: string; label: string; hint: string; title: string; description: string }> = [
   { id: "presets", icon: "✦", label: "Presets", hint: `${SHADER_PRESETS.length} looks`, title: "Ready-made looks", description: "Start from a finished shader, then make it yours." },
   { id: "field", icon: "◎", label: "Field", hint: "Generator", title: "Base generator", description: "Pick the procedural field and shape it with four knobs." },
-  { id: "layers", icon: "◧", label: "Layers", hint: "Overlay", title: "Stack a second layer", description: "Blend another generator on top for depth." },
+  { id: "stack", icon: "▤", label: "Stack", hint: "Layers", title: "Layer stack", description: "Order, blend and mix as many layers as you like." },
+  { id: "elements", icon: "❖", label: "Elements", hint: "Library", title: "Element library", description: "Backgrounds, gradients, patterns, light and texture — tap to add." },
+  { id: "text", icon: "T", label: "Text", hint: "Typography", title: "Text shader", description: "Create interactive, animated typography for hero sections and website components." },
+  { id: "mask", icon: "◩", label: "Shape", hint: "Image mask", title: "Image mask", description: "Turn a PNG, SVG or built-in silhouette into a living shader shape." },
   { id: "motion", icon: "↻", label: "Motion", hint: "Time & warp", title: "Time & warp", description: "Speed, rotation, symmetry and domain distortion." },
-  { id: "color", icon: "◐", label: "Color", hint: "Palette", title: "Palette & grade", description: "Build the gradient and grade the final image." },
+  { id: "color", icon: "◐", label: "Color", hint: "Gradient", title: "Palette & grade", description: "Place colour stops on the gradient bar and grade the final image." },
   { id: "surface", icon: "◈", label: "Surface", hint: "Light", title: "Light & relief", description: "Turn the field into a lit, glossy surface." },
   { id: "effects", icon: "✧", label: "Effects", hint: "Post FX", title: "Post effects", description: "Lens, film and retro finishing touches." },
-  { id: "touch", icon: "⌖", label: "Touch", hint: "Pointer", title: "Pointer & ripples", description: "How the shader reacts to your cursor." },
+  { id: "touch", icon: "⌖", label: "Touch", hint: "25 modes", title: "Pointer & touch", description: "Pick one of 25 pointer modes or build your own." },
 ];
 
-const CATEGORY_ICON: Record<GeneratorCategory, string> = { Fluid: "≈", Cosmic: "✺", Light: "☀", Pattern: "▦" };
+const CATEGORY_ICON: Record<GeneratorCategory, string> = { Fluid: "≈", Cosmic: "✺", Light: "☀", Pattern: "▦", Gradient: "◈" };
 
 const STORAGE_KEY = "particle-studio-shader-project";
 
@@ -136,7 +151,7 @@ interface DockDrag {
 /* ───────────────────────── small components ───────────────────────── */
 
 function PresetCard({ preset, active, onPick }: { preset: ShaderPreset; active: boolean; onPick: () => void }) {
-  const thumb = useSyncExternalStore(thumbStore.subscribe, () => thumbStore.get(preset.name));
+  const thumb = useThumb(presetThumbKey(preset.name));
   const colors = preset.project.palette;
   const style = {
     "--preset-color": colors[Math.min(2, colors.length - 1)] ?? "#8a7bd6",
@@ -193,6 +208,7 @@ function KnobSliders({ id, knobs, onChange }: { id: GeneratorId; knobs: Knobs; o
           max={def.max}
           step={def.step}
           value={knobs[i] ?? def.value}
+          reset={def.value}
           onChange={(value) => onChange(i as 0 | 1 | 2 | 3, value)}
         />
       ))}
@@ -215,6 +231,7 @@ export default function ShaderStudio({ active, modeSwitch }: ShaderStudioProps) 
   );
   const [activePreset, setActivePreset] = useState<string>(saved ? saved.preset : (SHADER_PRESETS[0]?.name ?? ""));
   const [section, setSection] = useState<SectionId>("presets");
+  const [selectedLayer, setSelectedLayer] = useState("base");
   const [collapsed, setCollapsed] = useState(false);
   const [dockFrac, setDockFrac] = useState<number>(loadDock);
   const [settle, setSettle] = useState(0);
@@ -226,6 +243,8 @@ export default function ShaderStudio({ active, modeSwitch }: ShaderStudioProps) 
   const [supported, setSupported] = useState(true);
   const [exportOpen, setExportOpen] = useState(false);
   const [recording, setRecording] = useState(false);
+  const [maskPixels, setMaskPixels] = useState<MaskPixels | null>(null);
+  const [maskBusy, setMaskBusy] = useState(false);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -271,6 +290,41 @@ export default function ShaderStudio({ active, modeSwitch }: ShaderStudioProps) 
       renderer.stop();
     }
   }, [active]);
+
+  /* the image mask: decode the source, build the distance texture, hand it to the GPU */
+  const maskEnabled = project.mask.enabled;
+  const maskSource = project.mask.source;
+  const maskThreshold = project.mask.threshold;
+  const maskInvert = project.mask.invert;
+  useEffect(() => {
+    if (!maskEnabled) {
+      setMaskPixels(null);
+      setMaskBusy(false);
+      rendererRef.current?.setMask(null);
+      return;
+    }
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      setMaskBusy(true);
+      sourceField(maskSource)
+        .then((field) => {
+          if (cancelled) return;
+          const pixels = maskPixelsFor(field, maskSource, maskThreshold, maskInvert);
+          setMaskPixels(pixels);
+          rendererRef.current?.setMask(pixels);
+        })
+        .catch(() => {
+          if (!cancelled) showToast("Couldn't read the mask image");
+        })
+        .finally(() => {
+          if (!cancelled) setMaskBusy(false);
+        });
+    }, 30);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [maskEnabled, maskSource, maskThreshold, maskInvert, showToast]);
 
   /* thumbnails are baked once, in the background, while the studio is visible */
   useEffect(() => {
@@ -375,18 +429,79 @@ export default function ShaderStudio({ active, modeSwitch }: ShaderStudioProps) 
     setIsSaved(false);
   }, []);
 
-  const updateOverlay = useCallback((patch: Partial<ShaderOverlay>) => {
-    setProject((current) => ({ ...current, overlay: { ...current.overlay, ...patch } }));
+  const patchProject = useCallback((patch: Partial<ShaderProject>) => {
+    setProject((current) => ({ ...current, ...patch }));
     setIsSaved(false);
   }, []);
+
+  const setLayers = useCallback((layers: ShaderLayer[]) => {
+    setProject((current) => ({ ...current, layers }));
+    setIsSaved(false);
+  }, []);
+
+  const updateMask = useCallback((patch: Partial<ShaderMask>) => {
+    setProject((current) => ({ ...current, mask: { ...current.mask, ...patch } }));
+    setIsSaved(false);
+  }, []);
+
+  const addMaskField = useCallback(
+    (region: "Inside" | "Outside", generator: GeneratorId) => {
+      if (project.layers.length >= MAX_LAYERS) {
+        showToast(`The stack holds ${MAX_LAYERS} layers — delete one first`);
+        return;
+      }
+      const layer = newLayer("field", {
+        name: `${region} · ${GENERATOR_MAP[generator].name}`,
+        generator,
+        knobs: defaultKnobs(generator),
+        region,
+      });
+      setLayers([layer, ...project.layers]);
+      setSelectedLayer(layer.id);
+      if (region === "Outside" && project.mask.ghost === 0) updateMask({ ghost: 1 });
+      setSection("stack");
+      showToast(`Added ${region.toLowerCase()} ${GENERATOR_MAP[generator].name} field`);
+    },
+    [project.layers, project.mask.ghost, setLayers, showToast, updateMask],
+  );
 
   const applyProject = useCallback((next: ShaderProject, presetName: string) => {
     setProject(cloneProject(next));
     setActivePreset(presetName);
+    setSelectedLayer("base");
     setIsSaved(false);
   }, []);
 
-  const range = (key: RangeKey) => RANGES[key];
+  const importMask = useCallback(
+    async (file: File) => {
+      setMaskBusy(true);
+      try {
+        const { name, data } = await importMaskFile(file);
+        updateMask({ enabled: true, source: { kind: "image", name, data } });
+        showToast(`Mask made from ${name}`);
+      } catch (err) {
+        setMaskBusy(false);
+        showToast(err instanceof Error ? err.message : "Couldn't read that image");
+      }
+    },
+    [showToast, updateMask],
+  );
+
+  const addElement = useCallback(
+    (item: LibraryItem, at: InsertAt) => {
+      const fresh = libraryLayers(item);
+      if (project.layers.length + fresh.length > MAX_LAYERS) {
+        showToast(`The stack holds ${MAX_LAYERS} layers — delete one first`);
+        return;
+      }
+      setLayers(at === "Top" ? [...fresh, ...project.layers] : [...project.layers, ...fresh]);
+      const first = fresh[0];
+      if (first) setSelectedLayer(first.id);
+      showToast(at === "Top" ? `Added ${item.label} on top` : `Added ${item.label} below the field`);
+    },
+    [project.layers, setLayers, showToast],
+  );
+
   const slider = (key: RangeKey & keyof ShaderProject, label: string, display?: string): ReactNode => {
     const r = RANGES[key];
     const value = project[key];
@@ -398,6 +513,7 @@ export default function ShaderStudio({ active, modeSwitch }: ShaderStudioProps) 
         max={r.max}
         step={r.step}
         display={display}
+        reset={typeof DEFAULT_PROJECT[key] === "number" ? (DEFAULT_PROJECT[key] as number) : undefined}
         onChange={(next) => update(key, next as ShaderProject[typeof key])}
       />
     );
@@ -409,29 +525,6 @@ export default function ShaderStudio({ active, modeSwitch }: ShaderStudioProps) 
     update("knobs", knobs);
   };
 
-  const setOverlayKnob = (index: 0 | 1 | 2 | 3, value: number) => {
-    const knobs: Knobs = [...project.overlay.knobs];
-    knobs[index] = value;
-    updateOverlay({ knobs });
-  };
-
-  /* palette */
-  const setPalette = (palette: string[]) => update("palette", palette);
-  const setPaletteColor = (index: number, color: string) =>
-    setPalette(project.palette.map((c, i) => (i === index ? color : c)));
-  const addPaletteColor = () => {
-    if (project.palette.length >= MAX_PALETTE) return;
-    const last = project.palette[project.palette.length - 1] ?? "#ffffff";
-    const prev = project.palette[project.palette.length - 2] ?? last;
-    const mix = (a: string, b: string, at: number) =>
-      Math.round((parseInt(a.slice(at, at + 2), 16) + parseInt(b.slice(at, at + 2), 16)) / 2).toString(16).padStart(2, "0");
-    setPalette([...project.palette, `#${mix(last, prev, 1)}${mix(last, prev, 3)}${mix(last, prev, 5)}`]);
-  };
-  const removePaletteColor = (index: number) => {
-    if (project.palette.length <= MIN_PALETTE) return;
-    setPalette(project.palette.filter((_, i) => i !== index));
-  };
-
   /* ───────── actions ───────── */
 
   const save = () => {
@@ -440,7 +533,7 @@ export default function ShaderStudio({ active, modeSwitch }: ShaderStudioProps) 
       setIsSaved(true);
       showToast("Shader saved on this device");
     } catch {
-      showToast("Couldn't save — storage is unavailable");
+      showToast("Couldn't save — storage is full or unavailable");
     }
   };
 
@@ -470,10 +563,17 @@ export default function ShaderStudio({ active, modeSwitch }: ShaderStudioProps) 
   }, [query]);
 
   const sectionMeta = SECTIONS.find((s) => s.id === section) ?? SECTIONS[0];
-  const gradient = `linear-gradient(90deg, ${project.palette.join(", ")})`;
   const canvasW = canvasRef.current?.width ?? 0;
   const canvasH = canvasRef.current?.height ?? 0;
-  const generatorLabel = `${generator.name}${project.overlay.enabled ? ` + ${GENERATOR_MAP[project.overlay.generator].name}` : ""}`;
+  const layerCount = project.layers.length;
+  const generatorLabel = `${generator.name}${layerCount > 1 ? ` + ${layerCount - 1} layer${layerCount > 2 ? "s" : ""}` : ""}${project.mask.enabled ? " · mask" : ""}`;
+
+  const hintFor = (id: SectionId): string => {
+    if (id === "stack") return `${layerCount} layer${layerCount === 1 ? "" : "s"}`;
+    if (id === "mask") return project.mask.enabled ? "On" : "Image mask";
+    if (id === "text") return project.mask.source.kind === "text" ? `${project.mask.source.text.length} chars` : "Typography";
+    return SECTIONS.find((s) => s.id === id)?.hint ?? "";
+  };
 
   /* ───────── panels ───────── */
 
@@ -507,7 +607,7 @@ export default function ShaderStudio({ active, modeSwitch }: ShaderStudioProps) 
               <span>⚄</span> Surprise me
             </button>
             <SoftTip>
-              Every preset is just a <b>project</b>: a generator, a palette and a few settings. Change anything and export the result.
+              Every preset is just a <b>project</b>: a layer stack, a palette and a few settings. Change anything and export the result.
             </SoftTip>
           </>
         );
@@ -518,8 +618,7 @@ export default function ShaderStudio({ active, modeSwitch }: ShaderStudioProps) 
             <GeneratorPicker
               value={project.generator}
               onPick={(id) => {
-                update("generator", id);
-                update("knobs", defaultKnobs(id));
+                patchProject({ generator: id, knobs: defaultKnobs(id) });
               }}
             />
             <div className="control-divider" />
@@ -530,46 +629,57 @@ export default function ShaderStudio({ active, modeSwitch }: ShaderStudioProps) 
           </>
         );
 
-      case "layers":
+      case "stack":
         return (
-          <>
-            <ToggleRow
-              title="Overlay layer"
-              description="Blend a second generator over the base field"
-              enabled={project.overlay.enabled}
-              onChange={(enabled) => updateOverlay({ enabled })}
-            />
-            {project.overlay.enabled && (
-              <>
-                <GeneratorPicker
-                  value={project.overlay.generator}
-                  onPick={(id) => updateOverlay({ generator: id, knobs: defaultKnobs(id) })}
-                />
-                <div className="control-divider" />
-                <ChoiceGroup label="Blend mode" value={project.overlay.blend} options={BLEND_MODES} onChange={(blend) => updateOverlay({ blend })} />
-                <RangeControl label="Opacity" {...range("overlayOpacity")} value={project.overlay.opacity} onChange={(opacity) => updateOverlay({ opacity })} />
-                <RangeControl label="Zoom" {...range("overlayScale")} value={project.overlay.scale} onChange={(scale) => updateOverlay({ scale })} />
-                <RangeControl label="Speed" {...range("overlaySpeed")} value={project.overlay.speed} onChange={(speed) => updateOverlay({ speed })} />
-                <RangeControl label="Palette offset" {...range("overlayShift")} value={project.overlay.shift} onChange={(shift) => updateOverlay({ shift })} />
-                <div className="control-divider" />
-                <KnobSliders id={project.overlay.generator} knobs={project.overlay.knobs} onChange={setOverlayKnob} />
-              </>
-            )}
-            <SoftTip>
-              The overlay uses the same palette. Try <b>Starfield + Add</b> over aurora, or <b>Bokeh + Screen</b> over rays.
-            </SoftTip>
-          </>
+          <StackPanel
+            project={project}
+            selectedId={selectedLayer}
+            onSelect={setSelectedLayer}
+            onLayers={setLayers}
+            onCanvas={(canvas) => update("canvas", canvas)}
+            onOpenElements={() => setSection("elements")}
+            onOpenField={() => setSection("field")}
+            showToast={showToast}
+          />
+        );
+
+      case "elements":
+        return <LibraryPanel layerCount={layerCount} onAdd={addElement} onOpenStack={() => setSection("stack")} />;
+
+      case "text":
+        return <TextPanel mask={project.mask} onMask={updateMask} />;
+
+      case "mask":
+        return (
+          <MaskPanel
+            project={project}
+            busy={maskBusy}
+            onMask={updateMask}
+            onAddField={addMaskField}
+            onImport={(file) => void importMask(file)}
+            onApplyLook={(look) => {
+              setProject((current) => applyLook(current, look));
+              setIsSaved(false);
+              showToast(`${look.name} look applied`);
+            }}
+          />
         );
 
       case "motion":
         return (
           <>
-            <ToggleRow
-              title={project.playing ? "Playing" : "Paused"}
-              description="Freeze or run the animation clock"
-              enabled={project.playing}
-              onChange={(playing) => update("playing", playing)}
-            />
+            <button
+              type="button"
+              className={`toggle-row ${project.playing ? "enabled" : ""}`}
+              aria-pressed={project.playing}
+              onClick={() => update("playing", !project.playing)}
+            >
+              <span>
+                <b>{project.playing ? "Playing" : "Paused"}</b>
+                <small>Freeze or run the animation clock</small>
+              </span>
+              <span className="toggle-switch" />
+            </button>
             {slider("speed", "Speed")}
             {slider("scale", "Zoom")}
             {slider("seed", "Seed")}
@@ -592,37 +702,22 @@ export default function ShaderStudio({ active, modeSwitch }: ShaderStudioProps) 
                 <b>{generator.name}</b> uses palette stops as colour roles: {generator.roles.map((role, i) => `${i + 1} ${role}`).join(" · ")}.
               </p>
             )}
-            <div className="gradient-bar" style={{ background: gradient }} />
-            <div className="palette-list">
-              {project.palette.map((color, index) => (
-                <div className="palette-color" key={index}>
-                  <span className="color-control">Stop {index + 1}</span>
-                  <span className="color-input-wrap">
-                    <input type="color" value={color} aria-label={`Palette stop ${index + 1}`} onChange={(event) => setPaletteColor(index, event.target.value)} />
-                    <code>{color.toUpperCase()}</code>
-                    {project.palette.length > MIN_PALETTE && (
-                      <button type="button" className="palette-remove" aria-label={`Remove stop ${index + 1}`} onClick={() => removePaletteColor(index)}>
-                        ×
-                      </button>
-                    )}
-                  </span>
-                </div>
-              ))}
-            </div>
+            <GradientBar
+              colors={project.palette}
+              positions={project.palettePositions}
+              min={MIN_PALETTE}
+              max={MAX_PALETTE}
+              soft={project.paletteSoft}
+              onSoftChange={(value) => update("paletteSoft", value)}
+              onChange={(palette, palettePositions) => patchProject({ palette, palettePositions })}
+            />
             <div className="export-actions separate-files">
-              <button type="button" className="text-action palette-add" disabled={project.palette.length >= MAX_PALETTE} onClick={addPaletteColor}>
-                + Add stop
-              </button>
-              <button type="button" className="text-action" onClick={() => setPalette([...project.palette].reverse())}>
-                ⇄ Reverse
-              </button>
               <button
                 type="button"
                 className="text-action"
                 onClick={() => {
                   const next = randomPalette();
-                  update("palette", next.palette);
-                  update("accent", next.accent);
+                  patchProject({ palette: next.palette, palettePositions: evenPositions(next.palette.length), accent: next.accent, paletteSoft: 1 });
                 }}
               >
                 ⚄ Shuffle
@@ -639,10 +734,14 @@ export default function ShaderStudio({ active, modeSwitch }: ShaderStudioProps) 
                   type="button"
                   className="palette-chip"
                   style={{ background: `linear-gradient(90deg, ${p.colors.join(", ")})` }}
-                  onClick={() => {
-                    update("palette", [...p.colors]);
-                    update("accent", p.accent);
-                  }}
+                  onClick={() =>
+                    patchProject({
+                      palette: [...p.colors],
+                      palettePositions: p.positions ? [...p.positions] : evenPositions(p.colors.length),
+                      paletteSoft: p.soft ?? 1,
+                      accent: p.accent,
+                    })
+                  }
                 >
                   <span>{p.name}</span>
                 </button>
@@ -696,29 +795,7 @@ export default function ShaderStudio({ active, modeSwitch }: ShaderStudioProps) 
         );
 
       case "touch":
-        return (
-          <>
-            <ChoiceGroup label="Pointer mode" value={project.interaction} options={INTERACTION_MODES} onChange={(mode) => update("interaction", mode)} />
-            {slider("interactionRadius", "Radius")}
-            {slider("interactionStrength", "Strength")}
-            <ToggleRow title="Click ripples" description="Press anywhere to send out a shockwave" enabled={project.ripples} onChange={(value) => update("ripples", value)} />
-            <ToggleRow title="Idle drift" description="The pointer wanders by itself when you stop moving" enabled={project.idleDrift} onChange={(value) => update("idleDrift", value)} />
-            <div className="interaction-card">
-              <span className="interaction-icon">⌖</span>
-              <div>
-                <b>{project.interaction === "Off" ? "Pointer ignored" : `${project.interaction} mode`}</b>
-                <p>
-                  {project.interaction === "Stir" && "The field swirls around your cursor."}
-                  {project.interaction === "Attract" && "The field bulges toward your cursor like a lens."}
-                  {project.interaction === "Repel" && "The field is pushed away from your cursor."}
-                  {project.interaction === "Light" && "Your cursor becomes a light source — it brightens the surface and moves the highlight."}
-                  {project.interaction === "Off" && "Only ripples (if enabled) react to input."}
-                  {" "}Hold the button down for a stronger pull. Black holes feed on it.
-                </p>
-              </div>
-            </div>
-          </>
-        );
+        return <TouchPanel project={project} onPatch={patchProject} />;
     }
   };
 
@@ -736,7 +813,7 @@ export default function ShaderStudio({ active, modeSwitch }: ShaderStudioProps) 
         >
           <span className="tab-icon">{s.icon}</span>
           <span className="tab-label">{s.label}</span>
-          <span className="tab-hint">{s.hint}</span>
+          <span className="tab-hint">{hintFor(s.id)}</span>
         </button>
       ))}
     </nav>
@@ -988,6 +1065,7 @@ export default function ShaderStudio({ active, modeSwitch }: ShaderStudioProps) 
       <ExportSheet
         open={exportOpen}
         project={project}
+        mask={maskPixels}
         canvasRef={canvasRef}
         rendererRef={rendererRef}
         onClose={() => setExportOpen(false)}

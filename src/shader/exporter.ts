@@ -1,10 +1,12 @@
 import {
+  ARRAY_UNIFORMS,
   VERTEX_SOURCE,
   buildFragmentSource,
   motionOf,
   staticUniforms,
 } from "./builder";
 import { GENERATOR_MAP } from "./generators";
+import { maskPixelsToDataUrl, type MaskPixels } from "./mask";
 import type { ShaderProject } from "./types";
 
 /* ───────────────────────── bundle ───────────────────────── */
@@ -18,6 +20,8 @@ export interface ShaderCodeBundle {
   react: string;
   json: string;
   readme: string;
+  /** the embedded mask texture (PNG data URL), when the project uses one */
+  maskUrl: string | null;
 }
 
 export const EXPORT_FORMATS = [
@@ -114,13 +118,38 @@ function createShader(canvas{{T:HTMLCanvasElement}}, isPaused{{T:() => boolean}}
   const set = (name{{T:string}}, value{{T:number | number[]}}) => {
     const l = loc(name);
     if (l === null) return;
-    if (typeof value === "number") GL.uniform1f(l, value);
-    else if (name === "uPal[0]") GL.uniform3fv(l, value);
+    if (typeof value === "number") { GL.uniform1f(l, value); return; }
+    const dim = ARRAYS[name];
+    if (dim === 1) GL.uniform1fv(l, value);
+    else if (dim === 3) GL.uniform3fv(l, value);
+    else if (dim === 4) GL.uniform4fv(l, value);
     else if (value.length === 2) GL.uniform2fv(l, value);
     else if (value.length === 3) GL.uniform3fv(l, value);
     else GL.uniform4fv(l, value);
   };
   for (const name of Object.keys(CONFIG.uniforms)) set(name, CONFIG.uniforms[name]);
+
+  /* image mask: a small packed texture (blurred coverage, signed distance, depth) */
+  const maskTex = GL.createTexture();
+  GL.activeTexture(GL.TEXTURE0);
+  GL.bindTexture(GL.TEXTURE_2D, maskTex);
+  GL.texImage2D(GL.TEXTURE_2D, 0, GL.RGBA, 1, 1, 0, GL.RGBA, GL.UNSIGNED_BYTE, new Uint8Array([0, 0, 0, 255]));
+  GL.texParameteri(GL.TEXTURE_2D, GL.TEXTURE_MIN_FILTER, GL.LINEAR);
+  GL.texParameteri(GL.TEXTURE_2D, GL.TEXTURE_MAG_FILTER, GL.LINEAR);
+  GL.texParameteri(GL.TEXTURE_2D, GL.TEXTURE_WRAP_S, GL.CLAMP_TO_EDGE);
+  GL.texParameteri(GL.TEXTURE_2D, GL.TEXTURE_WRAP_T, GL.CLAMP_TO_EDGE);
+  const maskLoc = loc("uMaskTex");
+  if (maskLoc !== null) GL.uniform1i(maskLoc, 0);
+  if (MASK_URL) {
+    const img = new Image();
+    img.onload = () => {
+      GL.bindTexture(GL.TEXTURE_2D, maskTex);
+      GL.pixelStorei(GL.UNPACK_COLORSPACE_CONVERSION_WEBGL, GL.NONE);
+      GL.pixelStorei(GL.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
+      GL.texImage2D(GL.TEXTURE_2D, 0, GL.RGBA, GL.RGBA, GL.UNSIGNED_BYTE, img);
+    };
+    img.src = MASK_URL;
+  }
 
   /* sizing — the buffer follows the canvas box; quality drops on slow GPUs */
   let quality = 1;
@@ -141,9 +170,12 @@ function createShader(canvas{{T:HTMLCanvasElement}}, isPaused{{T:() => boolean}}
 
   /* pointer — listens on the window so it also works behind page content */
   const M = CONFIG.motion;
-  let tx = 0, ty = 0, mx = 0, my = 0, stir = 0, press = 0, down = false, idle = 3.5;
+  let tx = 0, ty = 0, mx = 0, my = 0, vx = 0, vy = 0, stir = 0, press = 0, down = false, idle = 3.5;
   const ripples{{T:Ripple[]}} = [];
   let rippleIndex = 0;
+  const trail{{T:Ripple[]}} = [];
+  let trailIndex = 0, trailX = 0, trailY = 0;
+  const trailData = new Float32Array(48);
   const toSpace = (cx{{T:number}}, cy{{T:number}}) => {
     const r = canvas.getBoundingClientRect();
     const h = Math.max(1, r.height);
@@ -191,29 +223,53 @@ function createShader(canvas{{T:HTMLCanvasElement}}, isPaused{{T:() => boolean}}
       targetX = Math.sin(k * 0.21) * 0.28;
       targetY = Math.cos(k * 0.17) * 0.18;
     }
-    const px = mx, py = my, k1 = Math.min(1, dt * 7);
+    const px = mx, py = my, k1 = Math.min(1, dt * Math.max(1, M.follow));
     mx += (targetX - mx) * k1;
     my += (targetY - my) * k1;
-    const speed = Math.hypot(mx - px, my - py) / Math.max(dt, 1e-3);
+    const dtc = Math.max(dt, 1e-3), kv = Math.min(1, dt * 10);
+    vx += ((mx - px) / dtc - vx) * kv;
+    vy += ((my - py) / dtc - vy) * kv;
+    const vm = Math.hypot(vx, vy);
+    if (vm > 3) { vx *= 3 / vm; vy *= 3 / vm; }
+    const speed = Math.hypot(mx - px, my - py) / dtc;
     stir += (Math.min(1, speed * 0.8) - stir) * Math.min(1, dt * 4);
     press += ((down ? 1 : 0) - press) * Math.min(1, dt * (down ? 2.2 : 1.6));
 
     const clock = performance.now();
+    if (Math.hypot(mx - trailX, my - trailY) > 0.012) {
+      trail[trailIndex++ % 12] = { x: mx, y: my, t0: clock };
+      trailX = mx;
+      trailY = my;
+    }
     for (let i = 0; i < 4; i++) {
       const r = ripples[i];
       const age = r ? (clock - r.t0) / 1000 : 99;
       if (r && age < 5) { rip[i * 4] = r.x; rip[i * 4 + 1] = r.y; rip[i * 4 + 2] = age; rip[i * 4 + 3] = 1; }
       else { rip[i * 4] = 0; rip[i * 4 + 1] = 0; rip[i * 4 + 2] = -1; rip[i * 4 + 3] = 0; }
     }
+    const trailSeconds = Math.max(0.1, M.trail);
+    for (let i = 0; i < 12; i++) {
+      const t = trail[i];
+      const age = t ? (clock - t.t0) / 1000 : 99;
+      const life = t ? Math.max(0, 1 - age / trailSeconds) : 0;
+      if (t && life > 0) { trailData[i * 4] = t.x; trailData[i * 4 + 1] = t.y; trailData[i * 4 + 2] = age; trailData[i * 4 + 3] = life; }
+      else { trailData[i * 4] = 0; trailData[i * 4 + 1] = 0; trailData[i * 4 + 2] = -1; trailData[i * 4 + 3] = 0; }
+    }
+
+    GL.activeTexture(GL.TEXTURE0);
+    GL.bindTexture(GL.TEXTURE_2D, maskTex);
     set("uRes", [canvas.width, canvas.height]);
     set("uTime", time);
     set("uRot", M.rotation + spin);
     set("uPalShift", M.paletteShift + palette);
     set("uMouse", [mx, my]);
+    set("uVel", [vx, vy]);
     set("uStir", stir);
     set("uPress", press);
     const ripLoc = loc("uRip[0]");
     if (ripLoc !== null) GL.uniform4fv(ripLoc, rip);
+    const trailLoc = loc("uTrail[0]");
+    if (trailLoc !== null) GL.uniform4fv(trailLoc, trailData);
     GL.drawArrays(GL.TRIANGLES, 0, 3);
 
     ema = ema * 0.95 + dt * 0.05;
@@ -236,6 +292,7 @@ function createShader(canvas{{T:HTMLCanvasElement}}, isPaused{{T:() => boolean}}
     window.removeEventListener("pointerup", onUp);
     window.removeEventListener("pointercancel", onUp);
     GL.deleteProgram(program);
+    GL.deleteTexture(maskTex);
     GL.deleteVertexArray(vao);
     const lose = GL.getExtension("WEBGL_lose_context");
     if (lose) lose.loseContext();
@@ -249,10 +306,13 @@ const runtime = (typed: boolean): string =>
 const indent = (text: string, pad: string): string =>
   text.split("\n").map((line) => (line ? pad + line : line)).join("\n");
 
+const arraysJson = (): string => JSON.stringify(ARRAY_UNIFORMS);
+
 /* ───────────────────────── files ───────────────────────── */
 
 function buildCss(p: ShaderProject): string {
   const bg = p.palette[0] ?? "#000000";
+  const textMask = p.mask.enabled && p.mask.source.kind === "text";
   return `/* ${p.name} — generated by Particle Studio · Shader Studio */
 :root {
   --shader-bg: ${bg};
@@ -300,6 +360,31 @@ body {
   line-height: 1;
   text-shadow: 0 6px 40px rgba(0, 0, 0, 0.35);
 }
+${textMask ? `
+.hero.text-shader-hero h1 {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: pre;
+  border: 0;
+}
+
+.hero.text-shader-hero p { display: none; }
+
+#shader-canvas[data-shader-error] + .hero.text-shader-hero h1 {
+  position: static;
+  width: auto;
+  height: auto;
+  margin: 0;
+  overflow: visible;
+  clip: auto;
+  white-space: pre-line;
+}
+` : ""}
 
 .hero p {
   margin: 14px 0 0;
@@ -316,6 +401,8 @@ body {
 
 function buildHtml(p: ShaderProject, tag: string, inline: { css?: string; js?: string } = {}): string {
   const title = escapeHtml(p.name);
+  const textHeading = p.mask.enabled && p.mask.source.kind === "text" ? escapeHtml(p.mask.source.text) : title;
+  const heroClass = p.mask.enabled && p.mask.source.kind === "text" ? "hero text-shader-hero" : "hero";
   const style = inline.css ? `<style>\n${indent(inline.css, "    ")}\n    </style>` : `<link rel="stylesheet" href="style.css" />`;
   const script = inline.js ? `<script>\n${indent(inline.js.replace(/<\/script/gi, "<\\/script"), "    ")}\n    </script>` : `<script src="shader.js"></script>`;
   return `<!doctype html>
@@ -328,8 +415,8 @@ function buildHtml(p: ShaderProject, tag: string, inline: { css?: string; js?: s
   </head>
   <body>
     <canvas id="shader-canvas" aria-hidden="true"></canvas>
-    <main class="hero">
-      <h1>${title}</h1>
+    <main class="${heroClass}">
+      <h1>${textHeading}</h1>
       <p>${escapeHtml(tag)}</p>
     </main>
     ${script}
@@ -338,11 +425,19 @@ function buildHtml(p: ShaderProject, tag: string, inline: { css?: string; js?: s
 `;
 }
 
-function buildJavascript(p: ShaderProject): string {
+function describe(p: ShaderProject): string {
+  const layers = p.layers.filter((l) => l.visible).length;
+  const bits = [GENERATOR_MAP[p.generator].name];
+  if (layers > 1) bits.push(`${layers}-layer stack`);
+  if (p.mask.enabled) bits.push(p.mask.source.kind === "text" ? "text mask" : "image mask");
+  return bits.join(" + ");
+}
+
+function buildJavascript(p: ShaderProject, maskUrl: string | null): string {
   const frag = escapeTemplate(buildFragmentSource(p));
   const vert = escapeTemplate(VERTEX_SOURCE);
   return `/* ${p.name} — generated by Particle Studio · Shader Studio
- * Generator: ${GENERATOR_MAP[p.generator].name}${p.overlay.enabled ? ` + ${GENERATOR_MAP[p.overlay.generator].name} overlay` : ""}
+ * ${describe(p)}
  *
  * Usage:
  *   <canvas id="shader-canvas"></canvas>
@@ -357,6 +452,8 @@ function buildJavascript(p: ShaderProject): string {
 
   const VERTEX = \`${vert}\`;
   const FRAGMENT = \`${frag}\`;
+  const MASK_URL = ${JSON.stringify(maskUrl)};
+  const ARRAYS = ${arraysJson()};
 
   const CONFIG = ${buildConfig(p)};
 ${indent(runtime(false), "  ")}
@@ -373,7 +470,7 @@ ${indent(runtime(false), "  ")}
 `;
 }
 
-function buildReact(p: ShaderProject): string {
+function buildReact(p: ShaderProject, maskUrl: string | null): string {
   const frag = escapeTemplate(buildFragmentSource(p));
   const vert = escapeTemplate(VERTEX_SOURCE);
   return `/**
@@ -405,11 +502,15 @@ interface ShaderConfig {
     idleDrift: boolean;
     ripples: boolean;
     playing: boolean;
+    follow: number;
+    trail: number;
   };
 }
 
 const VERTEX = \`${vert}\`;
 const FRAGMENT = \`${frag}\`;
+const MASK_URL: string | null = ${JSON.stringify(maskUrl)};
+const ARRAYS: Record<string, number> = ${arraysJson()};
 
 const CONFIG: ShaderConfig = ${buildConfig(p)};
 
@@ -449,7 +550,8 @@ export default ShaderBackground;
 `;
 }
 
-function buildReadme(p: ShaderProject): string {
+function buildReadme(p: ShaderProject, hasMask: boolean): string {
+  const maskDescription = p.mask.source.kind === "text" ? "text mask" : "image mask";
   return `# ${p.name}
 
 Generated by Particle Studio · Shader Studio.
@@ -458,7 +560,7 @@ Generated by Particle Studio · Shader Studio.
 
 - index.html — page with a full-screen canvas and a placeholder hero
 - style.css — layout (the canvas is fixed behind your content)
-- shader.js — the WebGL2 runtime (shader source + settings are embedded)
+- shader.js — the WebGL2 runtime (shader source${hasMask ? ", mask texture" : ""} and settings are embedded)
 - shader.frag — the fragment shader on its own (GLSL ES 3.00)
 - project.json — the project; load it back into Shader Studio to keep editing
 - react/ShaderBackground.tsx — the same shader as a React component
@@ -470,24 +572,29 @@ Open index.html in a browser. WebGL2 is required (all current browsers).
 ## Tweak it
 
 Open shader.js and edit CONFIG: "uniforms" holds every colour and strength value,
-"motion" holds speed, spin and palette cycling. Keep CONFIG in sync with the
+"motion" holds speed, spin, pointer smoothing and palette cycling. Keep CONFIG in sync with the
 shader defines at the top of the fragment source if you change effects on/off.
-`;
+${hasMask ? `\nThe ${maskDescription} is embedded as MASK_URL (a small PNG data URL). Replace it to change the silhouette.\n` : ""}`;
 }
 
-export function generateShaderCode(p: ShaderProject): ShaderCodeBundle {
-  const tag = `Procedural shader · ${GENERATOR_MAP[p.generator].name}`;
+/** Everything is generated from the same project, so the export matches the preview exactly. */
+export function generateShaderCode(project: ShaderProject, mask: MaskPixels | null = null): ShaderCodeBundle {
+  /* a mask without pixels (still decoding) can't be exported — fall back to no mask */
+  const p: ShaderProject = project.mask.enabled && !mask ? { ...project, mask: { ...project.mask, enabled: false } } : project;
+  const maskUrl = p.mask.enabled && mask ? maskPixelsToDataUrl(mask) : null;
+  const tag = `Procedural shader · ${describe(p)}`;
   const css = buildCss(p);
-  const javascript = buildJavascript(p);
+  const javascript = buildJavascript(p, maskUrl);
   return {
     standaloneHtml: buildHtml(p, tag, { css, js: javascript }),
     html: buildHtml(p, tag),
     css,
     javascript,
     fragment: `// ${p.name} — fragment shader (GLSL ES 3.00), generated by Shader Studio\n// Uniforms are listed below; see shader.js for the values it sets each frame.\n${buildFragmentSource(p)}`,
-    react: buildReact(p),
-    json: JSON.stringify({ app: "particle-studio-shader", version: 1, project: p }, null, 2),
-    readme: buildReadme(p),
+    react: buildReact(p, maskUrl),
+    json: JSON.stringify({ app: "particle-studio-shader", version: 2, project }, null, 2),
+    readme: buildReadme(p, maskUrl !== null),
+    maskUrl,
   };
 }
 
@@ -578,8 +685,8 @@ export function buildZip(entries: ZipEntry[]): Blob {
 }
 
 /** The full web bundle: page, stylesheet, runtime, GLSL, project file and React component. */
-export function buildProjectZip(p: ShaderProject): Blob {
-  const code = generateShaderCode(p);
+export function buildProjectZip(p: ShaderProject, mask: MaskPixels | null = null): Blob {
+  const code = generateShaderCode(p, mask);
   return buildZip([
     { name: "index.html", content: code.html },
     { name: "style.css", content: code.css },
@@ -592,6 +699,11 @@ export function buildProjectZip(p: ShaderProject): Blob {
 }
 
 /* ───────────────────────── project JSON ───────────────────────── */
+
+/** The saved-project file; no GLSL is generated, so this is cheap enough to call on every click. */
+export function projectJson(p: ShaderProject): string {
+  return JSON.stringify({ app: "particle-studio-shader", version: 2, project: p }, null, 2);
+}
 
 /** Pulls the project out of a file saved by Shader Studio (also accepts a bare project object). */
 export function extractProject(text: string): unknown {

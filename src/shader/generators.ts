@@ -40,6 +40,53 @@ export interface GeneratorDef {
 const k = (label: string, min: number, max: number, step: number, value: number): KnobDef =>
   ({ label, min, max, step, value });
 
+const gradientKnobs: GeneratorDef["knobs"] = [
+  k("Scale", 0.4, 4, 0.05, 1.4),
+  k("Angle", -3.14, 3.14, 0.02, 0),
+  k("Distortion", 0, 2, 0.02, 0.5),
+  k("Flow", 0, 2, 0.02, 0.5),
+];
+
+function gradientGenerator(
+  id: GeneratorId,
+  name: string,
+  description: string,
+  expression: string,
+): GeneratorDef {
+  return {
+    id,
+    name,
+    category: "Gradient",
+    description,
+    knobs: gradientKnobs,
+    glsl: /* glsl */`
+vec4 FIELD(vec2 p, float t, vec4 K){
+  vec2 q = rot(K.y) * p * K.x;
+  float drift = t * K.w * .12;
+  vec2 flow = vec2(fbm(q + vec2(drift)), fbm(q + vec2(4.1, -drift))) - .5;
+  q += flow * K.z * .55;
+  float v = ${expression};
+  return vec4(clamp(v, 0., 1.), smoothstep(.72, 1., v) * .3, v, 0.);
+}`,
+  };
+}
+
+const GRADIENT_GENERATORS: GeneratorDef[] = [
+  gradientGenerator("linearGradient", "Linear Blend", "A clean directional ramp with gentle flowing distortion.", ".5 + q.x * .38"),
+  gradientGenerator("radialGradient", "Radial Bloom", "A soft radial gradient that blooms out from the centre.", "1. - length(q) * .38"),
+  gradientGenerator("conicGradient", "Conic Spectrum", "A smooth colour wheel swept around a central point.", "fract(atan(q.y, q.x) / TAU + 1.)"),
+  gradientGenerator("diamondGradient", "Diamond Fade", "A crisp, adjustable diamond-shaped colour falloff.", "1. - (abs(q.x) + abs(q.y)) * .3"),
+  gradientGenerator("spiralGradient", "Spiral Sweep", "A swirling gradient that coils outward from the centre.", "fract(atan(q.y, q.x) / TAU + length(q) * .22 + drift * .2)"),
+  gradientGenerator("reflectedGradient", "Reflected Spectrum", "A mirrored linear gradient with a luminous central seam.", ".5 + abs(q.x) * .4"),
+  gradientGenerator("sunsetGradient", "Sunset Horizon", "Layered sunset colours with a softly rippling horizon.", ".5 + q.y * .32 + sin(q.x * 2. + drift) * .12"),
+  gradientGenerator("iridescentGradient", "Iridescent Film", "Pearlescent colour bands that shift like a thin oil film.", ".5 + .5 * sin(q.x * 2. + sin(q.y * 1.6) + drift)"),
+  gradientGenerator("holographicGradient", "Holographic Foil", "Fine spectral bands with a subtle holographic shimmer.", ".5 + .22 * sin((q.x + q.y * .7) * 7. + drift * 2.) + .12 * sin(q.y * 14. - q.x * 3.)"),
+  gradientGenerator("liquidGradient", "Liquid Marble", "Marbled ribbons made by warping a flowing noise field.", ".5 + fbm(q * 1.8 + flow * 2. + drift) * 1.25"),
+  gradientGenerator("noiseGradient", "Noise Wash", "An organic colour wash with soft, evolving noise.", ".5 + fbm(q * 1.4 + vec2(drift)) * 1.5"),
+  gradientGenerator("topographicGradient", "Topographic", "Flowing elevation bands inspired by illustrated terrain maps.", "fract((.5 + fbm(q * 1.2 + vec2(drift)) * 1.3) * 7.)"),
+  gradientGenerator("prismaticGradient", "Prismatic Bands", "Radiating spectral waves with a colourful interference pattern.", ".5 + .5 * sin(length(q) * 3. - atan(q.y, q.x) * .7 + drift)"),
+];
+
 export const GENERATORS: GeneratorDef[] = [
   /* ───────────────────────────── Fluid ───────────────────────────── */
   {
@@ -135,7 +182,7 @@ vec4 FIELD(vec2 p, float t, vec4 K){
   {
     id: "mesh",
     name: "Mesh Gradient",
-    category: "Fluid",
+    category: "Gradient",
     description: "Soft colour blobs blended into a living gradient. Palette stops are the blob colours.",
     knobs: [k("Blobs", 3, 8, 1, 5), k("Sharpness", 0.5, 3, 0.05, 1.2), k("Motion", 0, 2.5, 0.05, 1), k("Wobble", 0, 1, 0.02, 0.3)],
     glsl: /* glsl */`
@@ -389,7 +436,7 @@ vec4 FIELD(vec2 p, float t, vec4 K){
   {
     id: "aurora",
     name: "Aurora Curtains",
-    category: "Light",
+    category: "Gradient",
     description: "Vertical curtains of light that ripple and flicker.",
     knobs: [k("Height", 0.4, 2.5, 0.05, 1), k("Ray density", 0, 1, 0.02, 0.5), k("Waviness", 0, 2, 0.05, 1), k("Gain", 0.5, 2, 0.05, 1)],
     glsl: /* glsl */`
@@ -659,6 +706,7 @@ vec4 FIELD(vec2 p, float t, vec4 K){
   return vec4(v, 0., n, 0.);
 }`,
   },
+  ...GRADIENT_GENERATORS,
 ];
 
 export const GENERATOR_MAP: Record<GeneratorId, GeneratorDef> =

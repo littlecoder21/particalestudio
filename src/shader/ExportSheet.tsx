@@ -1,7 +1,16 @@
 import { useEffect, useMemo, useRef, useState, type ComponentType, type RefObject } from "react";
 import { ChoiceGroup } from "./controls";
-import { EXPORT_FORMATS, buildProjectZip, extractProject, generateShaderCode, slugify, type ExportFormatId } from "./exporter";
+import {
+  EXPORT_FORMATS,
+  buildProjectZip,
+  extractProject,
+  generateShaderCode,
+  projectJson,
+  slugify,
+  type ExportFormatId,
+} from "./exporter";
 import { IconClose, IconCode, IconCopy, IconDownload, IconFile, IconImage, IconVideo } from "./icons";
+import type { MaskPixels } from "./mask";
 import { normalizeProject } from "./project";
 import type { ShaderRenderer } from "./renderer";
 import type { ShaderProject } from "./types";
@@ -48,6 +57,8 @@ const downloadText = (text: string, filename: string, mime: string): void =>
 interface ExportSheetProps {
   open: boolean;
   project: ShaderProject;
+  /** the packed image-mask texture currently on screen (embedded into code exports) */
+  mask: MaskPixels | null;
   canvasRef: RefObject<HTMLCanvasElement>;
   rendererRef: RefObject<ShaderRenderer | null>;
   onClose: () => void;
@@ -63,6 +74,7 @@ interface ExportSheetProps {
 export default function ExportSheet({
   open,
   project,
+  mask,
   canvasRef,
   rendererRef,
   onClose,
@@ -101,16 +113,23 @@ export default function ExportSheet({
   );
 
   /* generating every format is only worth doing while the code tab is on screen */
-  const code = useMemo(() => (open && tab === "code" ? generateShaderCode(project) : null), [open, tab, project]);
+  const code = useMemo(() => (open && tab === "code" ? generateShaderCode(project, mask) : null), [open, tab, project, mask]);
   const currentFormat = EXPORT_FORMATS.find((f) => f.id === codeFormat) ?? EXPORT_FORMATS[0];
   const currentCode = code ? code[codeFormat] : "";
+
+  /* the embedded mask is a long base64 string — keep it out of the preview box, not out of the download */
+  const previewCode = useMemo(() => {
+    if (!code || !code.maskUrl || !currentCode.includes(code.maskUrl)) return currentCode;
+    const kb = Math.max(1, Math.round(code.maskUrl.length / 1024));
+    return currentCode.split(code.maskUrl).join(`data:image/png;base64,…(${kb} KB mask texture — included when you copy or download)`);
+  }, [code, currentCode]);
 
   const copyCode = async (text: string) => {
     try {
       await navigator.clipboard.writeText(text);
       showToast("Copied to clipboard");
     } catch {
-      showToast("Copy failed — select the code and copy manually");
+      showToast("Copy failed — download the file instead");
     }
   };
 
@@ -199,7 +218,9 @@ export default function ExportSheet({
       case "code":
         return (
           <div className="export-pane">
-            <p className="field-help">Runs anywhere WebGL2 does. The shader and every setting are embedded.</p>
+            <p className="field-help">
+              Runs anywhere WebGL2 does. The shader, every setting{project.mask.enabled ? ` and the ${project.mask.source.kind === "text" ? "text" : "image"} mask` : ""} are embedded.
+            </p>
             <label className="svg-select-control">
               Format
               <select value={codeFormat} onChange={(event) => setCodeFormat(event.target.value as ExportFormatId)}>
@@ -210,7 +231,7 @@ export default function ExportSheet({
                 ))}
               </select>
             </label>
-            <textarea className="code-preview" readOnly spellCheck={false} value={currentCode} aria-label="Generated code" />
+            <textarea className="code-preview" readOnly spellCheck={false} value={previewCode} aria-label="Generated code" />
             <div className="export-actions">
               <button type="button" className="svg-upload-button" onClick={() => void copyCode(currentCode)}>
                 <IconCopy size={15} /> Copy
@@ -230,7 +251,7 @@ export default function ExportSheet({
               type="button"
               className="svg-upload-button"
               onClick={() => {
-                downloadBlob(buildProjectZip(project), `${slugify(project.name)}.zip`);
+                downloadBlob(buildProjectZip(project, mask), `${slugify(project.name)}.zip`);
                 showToast("ZIP downloaded");
               }}
             >
@@ -317,13 +338,13 @@ export default function ExportSheet({
       case "project":
         return (
           <div className="export-pane">
-            <p className="field-help">Save the full project as JSON and load it back any time.</p>
+            <p className="field-help">Save the full project (layers, colours, mask, touch rules) as JSON and load it back any time.</p>
             <div className="export-actions">
               <button
                 type="button"
                 className="svg-upload-button"
                 onClick={() => {
-                  downloadText(generateShaderCode(project).json, `${slugify(project.name)}.json`, "application/json");
+                  downloadText(projectJson(project), `${slugify(project.name)}.json`, "application/json");
                   showToast("Project JSON downloaded");
                 }}
               >

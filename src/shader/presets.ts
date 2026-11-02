@@ -1,11 +1,30 @@
-import { DEFAULT_PROJECT, normalizeProject } from "./project";
-import type { GeneratorId, ShaderOverlay, ShaderPreset, ShaderProject } from "./types";
+import { defaultKnobs } from "./generators";
+import { DEFAULT_MASK, DEFAULT_PROJECT, normalizeProject } from "./project";
+import { newBaseLayer, newLayer } from "./stack";
+import { DEFAULT_TOUCH } from "./touch";
+import type {
+  BlendMode,
+  GeneratorId,
+  LayerKind,
+  ShaderLayer,
+  ShaderMask,
+  ShaderPreset,
+  ShaderProject,
+  TouchSettings,
+} from "./types";
 
-type Extra = Partial<Omit<ShaderProject, "overlay" | "generator" | "knobs" | "palette" | "accent" | "name">> & {
-  overlay?: Partial<ShaderOverlay>;
+type StackLayer = Partial<ShaderLayer> & { kind: LayerKind };
+
+type Extra = Partial<Omit<ShaderProject, "generator" | "knobs" | "palette" | "accent" | "name" | "layers" | "mask" | "touch">> & {
+  /** shorthand for one generator layer on top of the stack */
+  overlay?: { enabled?: boolean; generator?: GeneratorId; blend?: BlendMode; opacity?: number };
+  /** extra layers above the main field, top layer first */
+  layers?: StackLayer[];
+  mask?: Partial<ShaderMask>;
+  touch?: Partial<TouchSettings>;
 };
 
-function mk(
+export function mk(
   name: string,
   tag: string,
   generator: GeneratorId,
@@ -14,7 +33,22 @@ function mk(
   accent: string,
   extra: Extra = {},
 ): ShaderPreset {
-  const { overlay, ...rest } = extra;
+  const { overlay, layers, mask, touch, ...rest } = extra;
+  const stack: ShaderLayer[] = [];
+  if (overlay?.enabled) {
+    const g = overlay.generator ?? "stars";
+    stack.push(newLayer("field", {
+      name: "Overlay",
+      generator: g,
+      knobs: defaultKnobs(g),
+      blend: overlay.blend ?? "Add",
+      opacity: overlay.opacity ?? 0.7,
+      ownColors: false,
+    }));
+  }
+  for (const layer of layers ?? []) stack.push(newLayer(layer.kind, layer));
+  stack.push(newBaseLayer());
+
   const project = normalizeProject({
     ...DEFAULT_PROJECT,
     ...rest,
@@ -22,8 +56,11 @@ function mk(
     generator,
     knobs,
     palette,
+    palettePositions: undefined,
     accent,
-    overlay: { ...DEFAULT_PROJECT.overlay, ...overlay },
+    layers: stack,
+    mask: { ...DEFAULT_MASK, ...mask },
+    touch: { ...DEFAULT_TOUCH, ...touch },
   });
   return { name, tag, project };
 }
@@ -190,10 +227,104 @@ export const SHADER_PRESETS: ShaderPreset[] = [
   mk("Dream Orbs", "Pastel floating bubbles", "bokeh", [3, 1.1, 0.8, 0.8],
     ["#1a1033", "#6a4bd0", "#ff8fd0", "#8fe8ff", "#ffffff"], "#ffffff",
     { glow: 0.2 }),
+
+  /* ── Shapes: an image mask drives the shader ── */
+  mk("Aurora Butterfly", "Glowing silhouette with stars", "aurora", [1.1, 0.55, 1.2, 1.2],
+    ["#020814", "#06402f", "#12b57c", "#6af0c1", "#b99bff"], "#d9fff1",
+    {
+      grain: 0.12, vignette: 0.4,
+      mask: { enabled: true, source: { kind: "shape", id: "butterfly" }, scale: 1.02, glow: 0.55, halo: 1.1, distort: 0.6, flow: 0.5, edge: 0.08, background: "#02040a" },
+      layers: [{ kind: "field", generator: "stars", blend: "Add", opacity: 0.75, region: "Inside" }],
+    }),
+  mk("Ember Skull", "Smoking, spark-filled skull", "fluid", [1.3, 1.1, 1.2, 0.2],
+    ["#120200", "#6a1403", "#e8590c", "#ffb347", "#fff3c4"], "#ffe2a8",
+    {
+      relief: 0.8, shine: 0.5, vignette: 0.5,
+      mask: { enabled: true, source: { kind: "shape", id: "skull" }, scale: 1.05, smoke: 0.5, particles: 0.3, halo: 1.2, flow: 0.8, glow: 0.6, background: "#060201", edge: 0.15 },
+    }),
+  mk("Chrome Heart", "Liquid metal pillow", "waves", [1.6, 0.1, 0.8, 0.4],
+    ["#08090d", "#3b4252", "#9aa3b8", "#e6ebf5", "#ffffff"], "#ffffff",
+    {
+      relief: 1.6, shine: 1, contrast: 1.15,
+      mask: { enabled: true, source: { kind: "shape", id: "heart" }, scale: 1, bevel: 1.2, outline: 0.25, halo: 0.5, background: "#05060b", edge: 0.05 },
+    }),
+  mk("Smoke Moon", "A crescent that dissolves", "fluid", [1.5, 1, 1.1, 0.1],
+    ["#04040c", "#1b1f5c", "#5b6cff", "#b8c6ff", "#ffffff"], "#dfe6ff",
+    {
+      grain: 0.2,
+      mask: { enabled: true, source: { kind: "shape", id: "moon" }, scale: 1.1, smoke: 0.8, smokeScale: 1.4, halo: 1.1, edge: 0.5, glow: 0.3, background: "#03030a" },
+    }),
+  mk("Particle Flower", "A bloom made of drifting dots", "mesh", [5, 1.2, 1, 0.3],
+    ["#ff6a9f", "#ffb86a", "#7a8cff", "#5fe3c8", "#c28cff"], "#ffffff",
+    {
+      mask: { enabled: true, source: { kind: "shape", id: "flower" }, scale: 1.05, particles: 1, particleSize: 0.9, particleSpeed: 0.8, glow: 0.5, halo: 0.8, background: "#0a0612" },
+    }),
+  mk("Echo Star", "Contour rings follow the edge", "plasma", [3.5, 0.9, 1.1, 0.2],
+    ["#07010f", "#2a0a5a", "#ff2fa8", "#2fe1ff", "#ffffff"], "#ffffff",
+    {
+      glow: 0.2,
+      mask: { enabled: true, source: { kind: "shape", id: "star" }, scale: 1.05, pattern: "Echo", patternAmount: 0.9, outline: 0.6, halo: 0.7, background: "#05010c" },
+    }),
+  mk("Hologram Drop", "Scanning cyan water drop", "lattice", [16, 0.06, 0.8, 0.8],
+    ["#01080c", "#04323f", "#0aa0b8", "#6cf0ff", "#e6ffff"], "#e6ffff",
+    {
+      aberration: 0.25, scanlines: 0.3,
+      mask: { enabled: true, source: { kind: "shape", id: "drop" }, scale: 1.05, pattern: "Scan", patternAmount: 0.6, halo: 0.8, glow: 0.4, background: "#010608" },
+    }),
+
+  /* ── Stacks: several layers working together ── */
+  mk("Dream Haze", "Soft gradient, bloom and grain", "mesh", [5, 1.1, 0.8, 0.3],
+    ["#ff9ad5", "#ffc58a", "#8f9bff", "#7be3d2", "#d6a8ff"], "#ffffff",
+    {
+      vignette: 0.15, grain: 0.05,
+      layers: [
+        { kind: "grain", name: "Film grain", blend: "Overlay", opacity: 0.4, knobs: [0.6, 1.4, 0.1, 0.5] },
+        { kind: "glow", name: "Bloom", blend: "Screen", opacity: 0.7, knobs: [-0.35, 0.2, 0.75, 1.6], colors: ["#ff9ad5", "#ffffff"] },
+        { kind: "noise", name: "Haze", blend: "Soft Light", opacity: 0.45, colors: ["#6a5acd", "#ffe6f7"], knobs: [1.2, 0.8, 1.2, 0.5] },
+      ],
+    }),
+  mk("Synthwave Horizon", "Neon grid with a gradient wash", "lattice", [12, 0.07, 0.6, 0.6],
+    ["#07010f", "#2a0a5a", "#ff2fa8", "#2fe1ff", "#ffffff"], "#ffffff",
+    {
+      glow: 0.3,
+      layers: [
+        { kind: "pattern", name: "Scanlines", pattern: "stripes", blend: "Multiply", opacity: 0.35, colors: ["#000000", "#ffffff"], knobs: [9, 0.45, 0.2, 90] },
+        { kind: "vignette", name: "Edge shade", opacity: 0.8, knobs: [0.65, 0.7, 1, 0] },
+        { kind: "linear", name: "Sky wash", blend: "Soft Light", opacity: 0.7, colors: ["#ff2fa8", "#2fe1ff"], knobs: [180, 1, 0, 0] },
+      ],
+    }),
+  mk("Paper Print", "Halftone on warm paper", "halftone", [34, 0.95, 0.5, 1.2],
+    ["#1a0a2e", "#7a1fa2", "#ff3d8a", "#ffb02e", "#fff3c4"], "#ffffff",
+    {
+      grain: 0.05, vignette: 0.1,
+      layers: [
+        { kind: "grain", name: "Paper tooth", blend: "Multiply", opacity: 0.35, knobs: [0.7, 2.2, 0, 0.15] },
+        { kind: "solid", name: "Paper tint", blend: "Multiply", opacity: 0.92, colors: ["#f3ead6", "#f3ead6"] },
+      ],
+    }),
+  mk("Deep Sea Glass", "Caustics under a dark lens", "caustics", [0.7, 1, 8, 5],
+    ["#01283a", "#04708f", "#18b6d0", "#8ff0f0", "#ffffff"], "#ffffff",
+    {
+      relief: 0.5,
+      layers: [
+        { kind: "noise", name: "Plankton", blend: "Screen", opacity: 0.25, colors: ["#000000", "#9ff6ff"], knobs: [2.4, 0.9, 2, 0.4], keyed: true },
+        { kind: "radial", name: "Depth", blend: "Multiply", opacity: 0.8, colors: ["#ffffff", "#021018"], knobs: [0, 0, 1.1, 1] },
+      ],
+    }),
+  mk("Gilded Night", "Nebula, stars and a golden glow", "nebula", [1.1, 0.5, 0.6, 1],
+    ["#030312", "#1a1060", "#6a2bb0", "#e0529c", "#ffd6c0"], "#ffffff",
+    {
+      glow: 0.2,
+      layers: [
+        { kind: "vignette", name: "Frame", opacity: 0.7, knobs: [0.7, 0.8, 1, 0] },
+        { kind: "glow", name: "Gold light", blend: "Screen", opacity: 0.6, knobs: [0.2, 0.25, 0.55, 1.8], colors: ["#b8860b", "#fff1b8"] },
+        { kind: "field", name: "Stars", generator: "stars", knobs: defaultKnobs("stars"), blend: "Add", opacity: 0.8 },
+      ],
+    }),
 ];
 
-/** A few ready-to-use palettes for the colour panel (dark → light). */
-export const PALETTE_LIBRARY: Array<{ name: string; colors: string[]; accent: string }> = [
+/** Ready-to-use palettes for the colour panel (dark → light). Some carry their own stop positions. */
+export const PALETTE_LIBRARY: Array<{ name: string; colors: string[]; accent: string; positions?: number[]; soft?: number }> = [
   { name: "Midnight", colors: ["#05060f", "#141a52", "#3a4fd6", "#8ab4ff", "#f2f7ff"], accent: "#9fe8ff" },
   { name: "Ember", colors: ["#120700", "#5a2a05", "#c9730c", "#ffc65a", "#fff4cf"], accent: "#fff1b8" },
   { name: "Neon", colors: ["#06020f", "#3b0a6e", "#e01a9b", "#2de2ff", "#f4fdff"], accent: "#ffffff" },
@@ -208,4 +339,14 @@ export const PALETTE_LIBRARY: Array<{ name: string; colors: string[]; accent: st
   { name: "Paper", colors: ["#efe6d2", "#d9c6a0", "#b5a17a", "#8a7556", "#4a3e2c"], accent: "#2c2418" },
   { name: "Mono", colors: ["#050505", "#2a2a2a", "#7a7a7a", "#cfcfcf", "#ffffff"], accent: "#ffffff" },
   { name: "Lava", colors: ["#2a0505", "#8a1111", "#ee4a14", "#ffa31a", "#fff0a0"], accent: "#ffe28a" },
+  { name: "Duotone Burn", colors: ["#0b0b12", "#ff3d6e", "#ffd166"], accent: "#ffffff", positions: [0, 0.72, 1] },
+  { name: "Deep Dive", colors: ["#00060f", "#003a66", "#00b4d8", "#caf0f8"], accent: "#ffffff", positions: [0, 0.4, 0.78, 1] },
+  { name: "Late Glow", colors: ["#10002b", "#7b2cbf", "#ff6d00", "#ffe066"], accent: "#ffffff", positions: [0, 0.3, 0.75, 1] },
+  { name: "Mint Cream", colors: ["#f1fff8", "#b8f2d8", "#4fd1a5", "#0f766e"], accent: "#052e2b", positions: [0, 0.35, 0.7, 1] },
+  { name: "Hard Bands", colors: ["#1b1b3a", "#693668", "#a74482", "#f84aa7", "#ff3562"], accent: "#ffffff", soft: 0 },
+  { name: "Risograph", colors: ["#f4ecd8", "#ff6f91", "#3a6ea5", "#1b1b3a"], accent: "#ffffff", positions: [0, 0.33, 0.66, 1], soft: 0.15 },
+  { name: "Terminal", colors: ["#000000", "#003b12", "#00ff66", "#d6ffe3"], accent: "#00ff66", positions: [0, 0.5, 0.85, 1] },
+  { name: "Rose Gold", colors: ["#2b1118", "#8a4b5a", "#e8a598", "#ffe8dc"], accent: "#ffffff", positions: [0, 0.4, 0.8, 1] },
+  { name: "Glacier", colors: ["#041428", "#1b5e8a", "#7fd0ee", "#e8fbff", "#ffffff"], accent: "#ffffff", positions: [0, 0.3, 0.6, 0.88, 1] },
+  { name: "Toxic", colors: ["#0b1a00", "#2d6a00", "#9be000", "#f4ff7a"], accent: "#ffffff", positions: [0, 0.45, 0.8, 1] },
 ];

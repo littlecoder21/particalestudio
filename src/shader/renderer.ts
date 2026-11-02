@@ -1,4 +1,5 @@
 import {
+  ARRAY_UNIFORMS,
   VERTEX_SOURCE,
   buildFragmentSource,
   motionOf,
@@ -7,6 +8,7 @@ import {
   type MotionConfig,
   type UniformEntry,
 } from "./builder";
+import type { MaskPixels } from "./mask";
 import type { ShaderProject } from "./types";
 
 export interface RendererStats {
@@ -31,6 +33,7 @@ interface Ripple {
 }
 
 const MAX_DPR = 1.75;
+const TRAIL_POINTS = 12;
 
 export class ShaderRenderer {
   readonly canvas: HTMLCanvasElement;
@@ -45,6 +48,9 @@ export class ShaderRenderer {
   private project: ShaderProject | null = null;
   private motion: MotionConfig | null = null;
   private statics: UniformEntry[] = [];
+
+  private maskTex: WebGLTexture | null = null;
+  private maskData: MaskPixels | null = null;
 
   private raf = 0;
   private running = false;
@@ -64,6 +70,8 @@ export class ShaderRenderer {
   private ty = 0;
   private mx = 0;
   private my = 0;
+  private vx = 0;
+  private vy = 0;
   private stir = 0;
   private press = 0;
   private down = false;
@@ -71,6 +79,11 @@ export class ShaderRenderer {
   private readonly ripples: Ripple[] = [];
   private rippleIndex = 0;
   private readonly ripData = new Float32Array(16);
+  private readonly trail: Ripple[] = [];
+  private trailIndex = 0;
+  private trailX = 0;
+  private trailY = 0;
+  private readonly trailData = new Float32Array(TRAIL_POINTS * 4);
   private readonly cleanups: Array<() => void> = [];
 
   constructor(canvas: HTMLCanvasElement, options: RendererOptions = {}) {
@@ -97,8 +110,10 @@ export class ShaderRenderer {
       this.program = null;
       this.key = "";
       this.locations.clear();
+      this.maskTex = null;
       this.vao = this.gl ? this.gl.createVertexArray() : null;
       if (this.gl) this.gl.bindVertexArray(this.vao);
+      this.uploadMask();
       if (this.project) this.setProject(this.project);
       if (this.wantsLoop) this.start();
     };
@@ -109,6 +124,7 @@ export class ShaderRenderer {
       canvas.removeEventListener("webglcontextrestored", onRestored);
     });
 
+    this.uploadMask();
     if (options.interactive) this.bindPointer();
     if (options.autoSize) {
       this.observer = new ResizeObserver(() => this.resize());
@@ -135,6 +151,33 @@ export class ShaderRenderer {
     }
     this.statics = staticUniforms(project);
     this.uploadStatics();
+  }
+
+  /** Sets (or clears, with null) the packed mask texture the shader samples. */
+  setMask(pixels: MaskPixels | null): void {
+    this.maskData = pixels;
+    this.uploadMask();
+    if (!this.running) this.draw();
+  }
+
+  private uploadMask(): void {
+    const gl = this.gl;
+    if (!gl) return;
+    if (!this.maskTex) this.maskTex = gl.createTexture();
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, this.maskTex);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+    gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
+    const px = this.maskData;
+    if (px) {
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, px.size, px.size, 0, gl.RGBA, gl.UNSIGNED_BYTE, px.data);
+    } else {
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([0, 0, 0, 255]));
+    }
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
   }
 
   private compile(project: ShaderProject): boolean {
@@ -172,6 +215,8 @@ export class ShaderRenderer {
     this.program = program;
     this.locations.clear();
     gl.useProgram(program);
+    const maskLoc = this.loc("uMaskTex");
+    if (maskLoc !== null) gl.uniform1i(maskLoc, 0);
     this.options.onError?.(null);
     return true;
   }
@@ -206,15 +251,15 @@ export class ShaderRenderer {
     if (location === null) return;
     if (typeof value === "number") {
       gl.uniform1f(location, value);
-    } else if (name === "uPal[0]") {
-      gl.uniform3fv(location, value);
-    } else if (value.length === 2) {
-      gl.uniform2fv(location, value);
-    } else if (value.length === 3) {
-      gl.uniform3fv(location, value);
-    } else if (value.length === 4) {
-      gl.uniform4fv(location, value);
+      return;
     }
+    const arrayDim = ARRAY_UNIFORMS[name];
+    if (arrayDim === 1) gl.uniform1fv(location, value);
+    else if (arrayDim === 3) gl.uniform3fv(location, value);
+    else if (arrayDim === 4) gl.uniform4fv(location, value);
+    else if (value.length === 2) gl.uniform2fv(location, value);
+    else if (value.length === 3) gl.uniform3fv(location, value);
+    else if (value.length === 4) gl.uniform4fv(location, value);
   }
 
   private uploadStatics(): void {
@@ -225,12 +270,22 @@ export class ShaderRenderer {
 
   /* ───────────── sizing ───────────── */
 
+  private previewScale(): number {
+    const base = Math.min(window.devicePixelRatio || 1, MAX_DPR);
+    if (!this.project) return base * this.quality;
+    const layerCount = this.project.layers.filter((layer) => layer.visible).length;
+    const layerPenalty = Math.max(0.55, 1 - Math.max(0, layerCount - 3) * 0.12);
+    const maskPenalty = this.project.mask.enabled ? 0.9 : 1;
+    const scaled = base * this.quality * layerPenalty * maskPenalty;
+    return Math.max(0.5, Math.min(MAX_DPR, scaled));
+  }
+
   resize(): void {
     const gl = this.gl;
     if (!gl || !this.options.autoSize) return;
     const rect = this.canvas.getBoundingClientRect();
     if (rect.width < 2 || rect.height < 2) return;
-    const dpr = Math.min(window.devicePixelRatio || 1, MAX_DPR) * this.quality;
+    const dpr = this.previewScale();
     const w = Math.max(2, Math.floor(rect.width * dpr));
     const h = Math.max(2, Math.floor(rect.height * dpr));
     let changed = false;
@@ -351,12 +406,29 @@ export class ShaderRenderer {
     }
     const px = this.mx;
     const py = this.my;
-    const k1 = Math.min(1, dt * 7);
+    const k1 = Math.min(1, dt * Math.max(1, m.follow));
     this.mx += (tx - this.mx) * k1;
     this.my += (ty - this.my) * k1;
-    const speed = Math.hypot(this.mx - px, this.my - py) / Math.max(dt, 1e-3);
+
+    const dtc = Math.max(dt, 1e-3);
+    const kv = Math.min(1, dt * 10);
+    this.vx += ((this.mx - px) / dtc - this.vx) * kv;
+    this.vy += ((this.my - py) / dtc - this.vy) * kv;
+    const vm = Math.hypot(this.vx, this.vy);
+    if (vm > 3) {
+      this.vx *= 3 / vm;
+      this.vy *= 3 / vm;
+    }
+
+    const speed = Math.hypot(this.mx - px, this.my - py) / dtc;
     this.stir += (Math.min(1, speed * 0.8) - this.stir) * Math.min(1, dt * 4);
     this.press += ((this.down ? 1 : 0) - this.press) * Math.min(1, dt * (this.down ? 2.2 : 1.6));
+
+    if (Math.hypot(this.mx - this.trailX, this.my - this.trailY) > 0.012) {
+      this.trail[this.trailIndex++ % TRAIL_POINTS] = { x: this.mx, y: this.my, t0: performance.now() };
+      this.trailX = this.mx;
+      this.trailY = this.my;
+    }
   }
 
   /** Render a single frame at an explicit shader time (thumbnails, stills). */
@@ -366,8 +438,12 @@ export class ShaderRenderer {
     this.palAcc = 0;
     this.mx = 0;
     this.my = 0;
+    this.vx = 0;
+    this.vy = 0;
     this.stir = 0;
     this.press = 0;
+    this.trail.length = 0;
+    this.trailIndex = 0;
     this.draw();
   }
 
@@ -377,6 +453,8 @@ export class ShaderRenderer {
     if (!gl || !m || !this.program) return;
     gl.useProgram(this.program);
     gl.bindVertexArray(this.vao);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, this.maskTex);
 
     const now = performance.now();
     for (let i = 0; i < 4; i++) {
@@ -385,16 +463,27 @@ export class ShaderRenderer {
       if (r && age < 5) this.ripData.set([r.x, r.y, age, 1], i * 4);
       else this.ripData.set([0, 0, -1, 0], i * 4);
     }
+    const trailSeconds = Math.max(0.1, m.trail);
+    for (let i = 0; i < TRAIL_POINTS; i++) {
+      const point = this.trail[i];
+      const age = point ? (now - point.t0) / 1000 : 99;
+      const life = point ? Math.max(0, 1 - age / trailSeconds) : 0;
+      if (point && life > 0) this.trailData.set([point.x, point.y, age, life], i * 4);
+      else this.trailData.set([0, 0, -1, 0], i * 4);
+    }
 
     this.setUniform("uRes", [this.canvas.width, this.canvas.height]);
     this.setUniform("uTime", this.time);
     this.setUniform("uRot", m.rotation + this.spinAcc);
     this.setUniform("uPalShift", m.paletteShift + this.palAcc);
     this.setUniform("uMouse", [this.mx, this.my]);
+    this.setUniform("uVel", [this.vx, this.vy]);
     this.setUniform("uStir", this.stir);
     this.setUniform("uPress", this.press);
     const ripLoc = this.loc("uRip[0]");
     if (ripLoc !== null) gl.uniform4fv(ripLoc, this.ripData);
+    const trailLoc = this.loc("uTrail[0]");
+    if (trailLoc !== null) gl.uniform4fv(trailLoc, this.trailData);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
   }
 
@@ -430,7 +519,9 @@ export class ShaderRenderer {
     if (!gl) return;
     if (this.program) gl.deleteProgram(this.program);
     if (this.vao) gl.deleteVertexArray(this.vao);
+    if (this.maskTex) gl.deleteTexture(this.maskTex);
     this.program = null;
+    this.maskTex = null;
     if (release) gl.getExtension("WEBGL_lose_context")?.loseContext();
   }
 }

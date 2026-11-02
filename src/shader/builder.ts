@@ -1,9 +1,16 @@
 import { GENERATOR_MAP } from "./generators";
+import { SDF_SPAN } from "./mask";
 import {
-  BLEND_MODES,
-  INTERACTION_MODES,
-  type ShaderProject,
-} from "./types";
+  STACK_GLSL_HELPERS,
+  blendLibrary,
+  buildStackGlsl,
+  fieldFnName,
+  stackOrder,
+  stackSignature,
+  stackUniforms,
+} from "./stack";
+import { activeRules, buildTouchGlsl, ruleUniform, touchFlags, touchSignature } from "./touch";
+import { MASK_PATTERNS, MAX_LAYERS, MAX_LAYER_COLORS, MAX_RULES, type GeneratorId, type ShaderProject } from "./types";
 
 /* ─────────────────────────── helpers ─────────────────────────── */
 
@@ -17,6 +24,19 @@ export function hexToRgb(hex: string): [number, number, number] {
 }
 
 const RAD = Math.PI / 180;
+
+/** Uniform arrays and how many floats each element has (uniform1fv / 3fv / 4fv). */
+export const ARRAY_UNIFORMS: Record<string, 1 | 3 | 4> = {
+  "uPal[0]": 3,
+  "uPalPos[0]": 1,
+  "uCA[0]": 4,
+  "uLA[0]": 4,
+  "uLB[0]": 4,
+  "uLK[0]": 4,
+  "uLF[0]": 4,
+  "uLP[0]": 3,
+  "uLQ[0]": 4,
+};
 
 /* ─────────────────────────── GLSL source ─────────────────────────── */
 
@@ -32,11 +52,13 @@ uniform float uTime;
 uniform float uRot;
 uniform float uPalShift;
 uniform vec2  uMouse;
+uniform vec2  uVel;
 uniform float uStir;
 uniform float uPress;
 uniform vec4  uRip[4];
+uniform vec4  uTrail[12];
+uniform vec4  uCA[${MAX_RULES}];
 uniform vec4  uK;
-uniform vec4  uK2;
 uniform float uScale;
 uniform float uWarp;
 uniform float uWarpScale;
@@ -45,8 +67,11 @@ uniform float uSym;
 uniform float uPix;
 uniform float uSeed;
 uniform vec3  uPal[6];
+uniform float uPalPos[6];
 uniform float uPalN;
+uniform float uPalSoft;
 uniform vec3  uAccent;
+uniform vec3  uCanvas;
 uniform float uPalRep;
 uniform float uContrast;
 uniform float uExposure;
@@ -62,12 +87,12 @@ uniform float uVig;
 uniform float uGrain;
 uniform float uScan;
 uniform float uPost;
-uniform float uIStr;
-uniform float uIRad;
-uniform float uOp2;
-uniform float uScale2;
-uniform float uSpd2;
-uniform float uShift2;
+uniform vec4  uLA[${MAX_LAYERS}];
+uniform vec4  uLB[${MAX_LAYERS}];
+uniform vec4  uLK[${MAX_LAYERS}];
+uniform vec4  uLF[${MAX_LAYERS}];
+uniform vec3  uLP[${MAX_LAYERS * MAX_LAYER_COLORS}];
+uniform vec4  uLQ[${MAX_LAYERS * 2}];
 `;
 
 const COMMON = /* glsl */`
@@ -78,6 +103,13 @@ const COMMON = /* glsl */`
 vec3  gCol = vec3(0.);
 float gHas = 0.;
 float gRip = 0.;
+float gPalOff = 0.;
+vec3  gPal[6];
+float gPos[6];
+float gPalN = 2.;
+float gRep = 1.;
+float gSh = 0.;
+float gSoft = 1.;
 
 mat2 rot(float a){ float c = cos(a), s = sin(a); return mat2(c, s, -s, c); }
 
@@ -107,14 +139,23 @@ float hexDist(vec2 p){
   return max(dot(p, normalize(vec2(1., 1.7320508))), p.x);
 }
 
-vec3 palAt(int i){ return uPal[clamp(i, 0, int(uPalN) - 1)]; }
-vec3 palCycle(int i){ return palAt(int(mod(float(i), uPalN))); }
+/* colour roles and the colour ramp. Stops can sit anywhere on the bar. */
+vec3 palAt(int i){ return gPal[clamp(i, 0, int(gPalN) - 1)]; }
+vec3 palCycle(int i){ return palAt(int(mod(float(i), gPalN))); }
 vec3 ramp(float v){
-  float x = v * uPalRep + uPalShift;
+  float x = v * gRep + gSh;
   x = 1. - abs(1. - mod(x, 2.));
-  float s = x * (uPalN - 1.);
-  int i = int(floor(s));
-  return mix(palAt(i), palAt(i + 1), s - float(i));
+  int n = int(gPalN);
+  if (x <= gPos[0]) return gPal[0];
+  for (int i = 1; i < 6; i++){
+    if (i >= n) break;
+    if (x <= gPos[i]){
+      float t = clamp((x - gPos[i - 1]) / max(gPos[i] - gPos[i - 1], 1e-4), 0., 1.);
+      t = mix(step(.5, t), t, gSoft);
+      return mix(gPal[i - 1], gPal[i], t);
+    }
+  }
+  return gPal[n - 1];
 }
 vec3 hueShift(vec3 c, float a){
   const vec3 k = vec3(.57735026);
@@ -123,21 +164,142 @@ vec3 hueShift(vec3 c, float a){
 }
 `;
 
+/* ───────────────────────── image mask ───────────────────────── */
+
+const MASK_GLSL = /* glsl */`
+uniform sampler2D uMaskTex;
+uniform vec4 uM0;   /* scale, x, y, rotation */
+uniform vec4 uM1;   /* follow, breathe, grow, edge */
+uniform vec4 uM2;   /* sdf span, smoke, smoke scale, bevel */
+uniform vec4 uM3;   /* glow, halo, outline, distort */
+uniform vec4 uM4;   /* particles, size, speed, flow */
+uniform vec4 uM5;   /* pattern amount, scale, angle, speed */
+uniform vec4 uM6;   /* ghost, inner boost, inner hue */
+uniform vec3 uMBg;
+
+/* x = blurred coverage, y = signed distance in screen units (+ inside), z = interior depth */
+vec3 maskAt(vec2 uv){
+  float sc = max(uM0.x * (1. + uM1.y * .05 * sin(uTime * 1.4)), .02);
+  vec2 q = uv - uM0.yz - uMouse * uM1.x;
+  q = rot(-uM0.w) * q / sc + .5;
+  vec2 cq = clamp(q, 0., 1.);
+  vec4 s = texture(uMaskTex, cq);
+  float outD = length(q - cq) * sc;
+  float sd = (s.g - .5) * uM2.x * sc - outD;
+  return vec3(s.r * (1. - smoothstep(0., .05, outD)), sd, s.b * (1. - step(1e-4, outD)));
+}
+
+float shapeSd(vec2 uv, float sd){
+  sd += uM1.z * .08;
+#ifdef MSMOKE
+  sd += fbm(uv * uM2.z * 3. + vec2(uTime * .08, -uTime * .06)) * uM2.y * .24;
+#endif
+  return sd;
+}
+
+#ifdef MPART
+float particleCov(vec2 uv){
+  float cs = .045 * uM4.y;
+  float spd = uM4.z * .32;
+  vec2 g = uv / cs;
+  g.y -= uTime * spd;
+  vec2 id = floor(g);
+  vec2 f = fract(g) - .5;
+  float h = hash21(id + SEED);
+  vec2 off = (hash22(id + 3.1 + SEED) - .5) * .5;
+  vec2 cuv = (id + .5) * cs;
+  cuv.y += uTime * spd * cs;
+  vec3 mc = maskAt(cuv);
+  float sd = shapeSd(cuv, mc.y);
+  float vis = smoothstep(-.03 - .12 * uM2.y, .02, sd);
+  float keep = step(h, clamp(.3 + sd * 9., 0., 1.));
+  float tw = .55 + .45 * sin(uTime * (1.2 + h * 2.) + h * 40.);
+  float rad = (.1 + .13 * h) * tw;
+  float d = length(f - off);
+  return (1. - smoothstep(rad * .55, rad, d)) * vis * keep;
+}
+#endif
+
+#if MPAT != 0
+float maskPattern(vec2 uv, float sd, float depth){
+  float t = uTime * uM5.w;
+  vec2 q = rot(uM5.z) * uv * uM5.y * 14.;
+#if MPAT == 1
+  return smoothstep(.3, .7, .5 + .5 * sin(q.x * 3. + t * 3.));
+#elif MPAT == 2
+  return 1. - smoothstep(.22, .34, length(fract(q + vec2(0., t)) - .5));
+#elif MPAT == 3
+  vec2 g = abs(fract(q + .5) - .5);
+  return 1. - smoothstep(.02, .07, min(g.x, g.y));
+#elif MPAT == 4
+  float e = sd > 0. ? depth * 34. : sd * 150.;
+  return smoothstep(.35, .65, .5 + .5 * sin(e * uM5.y * 1.6 - t * 4.));
+#elif MPAT == 5
+  return mod(floor(q.x) + floor(q.y), 2.);
+#elif MPAT == 6
+  return smoothstep(.35, .65, .5 + .5 * sin((q.x + q.y) * 3.2 + t * 3.));
+#else
+  return smoothstep(.2, .8, .5 + .5 * sin(q.y * 7. - t * 5.));
+#endif
+}
+#endif
+`;
+
+const MASK_PRELUDE = /* glsl */`
+  vec3 mk = maskAt(uv);
+  float sd = shapeSd(uv, mk.y);
+  float es = max(uM1.w * .06, fwidth(sd) * .9 + 2e-4);
+  float shape = smoothstep(-es, es, sd);
+  float cov = shape;
+#ifdef MPART
+  float pc = particleCov(uv);
+  cov = mix(shape, pc, uM4.x);
+#endif`;
+
+const MASK_COMPOSITE = /* glsl */`
+#ifdef MASK
+  vec3 inner = col * exp2(uM6.y);
+  #ifdef MHUE
+    inner = hueShift(inner, uM6.z);
+  #endif
+  #if MPAT != 0
+    float pt = maskPattern(uv, sd, mk.z);
+    inner = mix(inner, mix(inner * .28, inner * 1.35 + uAccent * .1, pt), uM5.x * cov);
+  #endif
+  float span = .5 * uM2.x * max(uM0.x, .02);
+  float rim = pow(clamp(1. - max(sd, 0.) / span, 0., 1.), 3.) * shape;
+  inner += uAccent * rim * uM3.x * (.55 + .45 * dot(inner, vec3(.3333)));
+  vec3 hc = mix(uAccent, ramp(.72), .45);
+  float ho = clamp(max(-sd, 0.) / span, 0., 1.);
+  float halo = (1. - shape) * (.7 * pow(1. - ho, 1.6) + .9 * mk.x);
+  vec3 outer = mix(uMBg, col * .55, uM6.x);
+  outer += hc * halo * uM3.y * .55;
+  col = mix(outer, inner, cov);
+  float ol = exp(-(sd * sd) / 4e-5);
+  col += uAccent * ol * uM3.z * 1.4;
+  #ifdef MPART
+    col += uAccent * pc * uM4.x * .45;
+  #endif
+#endif`;
+
+/* ───────────────────────── pipeline ───────────────────────── */
+
 const PIPELINE = /* glsl */`
-/* pointer, ripples, kaleidoscope, rotation, swirl, zoom and domain warp */
+/* pointer rules, mask flow, ripples, kaleidoscope, rotation, swirl, zoom and domain warp */
 vec2 xform(vec2 p, float t){
   gRip = 0.;
-#if IMODE != 0 && IMODE != 4
-  vec2 dm = p - uMouse;
-  float R = max(uIRad, .02);
-  float pw = exp(-dot(dm, dm) / (R * R));
-  #if IMODE == 1
-    p += vec2(-dm.y, dm.x) * pw * (.12 + .6 * uStir) * uIStr;
-  #elif IMODE == 2
-    p -= dm * pw * .55 * uIStr * (1. + uPress);
-  #else
-    p += dm * pw * .55 * uIStr * (1. + uPress);
-  #endif
+  p = touchWarp(p);
+#ifdef MWARP
+  {
+    vec3 m0 = maskAt(p);
+    float e = .01;
+    vec2 gd = vec2(maskAt(p + vec2(e, 0.)).y - maskAt(p - vec2(e, 0.)).y,
+                   maskAt(p + vec2(0., e)).y - maskAt(p - vec2(0., e)).y) / (2. * e);
+    vec2 nn = gd / (length(gd) + 1e-3);
+    float ew = exp(-m0.y * m0.y / .0049);
+    p -= nn * uM3.w * .05 * ew;
+    p += vec2(-nn.y, nn.x) * uM4.w * .06 * ew * sin(uTime * .9 - m0.y * 38.);
+  }
 #endif
 #ifdef RIPPLES
   for (int i = 0; i < 4; i++){
@@ -174,26 +336,8 @@ vec2 xform(vec2 p, float t){
 }
 `;
 
-const LAYER_BLEND = /* glsl */`
-vec3 blendLayer(vec3 a, vec3 b, float m){
-#if BLEND == 0
-  return mix(a, b, clamp(uOp2 * m * 1.6, 0., 1.));
-#elif BLEND == 1
-  return a + b * uOp2;
-#elif BLEND == 2
-  return 1. - (1. - a) * (1. - b * uOp2);
-#elif BLEND == 3
-  return a * mix(vec3(1.), b, uOp2);
-#elif BLEND == 4
-  vec3 o = mix(2. * a * b, 1. - 2. * (1. - a) * (1. - b), step(.5, a));
-  return mix(a, o, uOp2);
-#else
-  return mix(a, abs(a - b), uOp2);
-#endif
-}
-`;
-
-const SCENE = /* glsl */`
+function buildScene(stackCode: string, hasMask: boolean): string {
+  return /* glsl */`
 vec3 scene(vec2 uv0){
   float t = uTime;
   vec2 uv = uv0;
@@ -201,28 +345,27 @@ vec3 scene(vec2 uv0){
   uv = (floor(uv * uPix) + .5) / uPix;
 #endif
   vec2 p = xform(uv, t);
+${hasMask ? MASK_PRELUDE : "  float cov = 1.;"}
 
-  gHas = 0.;
-  vec4 f = fieldA(p, t, uK);
-  vec3 col = mix(ramp(clamp(f.x, 0., 1.)), gCol, gHas);
-  col = mix(col, uAccent, clamp(f.y, 0., 1.));
-  float h = f.z;
-  float hole = f.w;
+  gPalOff = 0.;
+  gSoft = uPalSoft;
+  touchPre(uv);
 
-#ifdef LAYER2
-  gHas = 0.;
-  vec4 g = fieldB(p * uScale2, t * uSpd2, uK2);
-  vec3 c2 = mix(ramp(clamp(g.x, 0., 1.) + uShift2), gCol, gHas);
-  c2 = mix(c2, uAccent, clamp(g.y, 0., 1.));
-  col = blendLayer(col, c2, g.x);
-  h += g.z * uOp2 * .5;
-  hole = max(hole, g.w * uOp2);
+${stackCode}
+  gSoft = uPalSoft;
+  vec3 col = mix(uCanvas, cb, ab);
+
+#ifdef MBEVEL
+  h += mk.z * 4. * uM2.w;
 #endif
-
 #ifdef RELIEF
-  vec2 gr = vec2(dFdx(h), dFdy(h)) * uRes.y * .004 * uRelief;
+  float rs = uRelief;
+  #ifdef MBEVEL
+    rs += uM2.w * 1.4;
+  #endif
+  vec2 gr = vec2(dFdx(h), dFdy(h)) * uRes.y * .004 * rs;
   vec3 n = normalize(vec3(-gr, 1.));
-  #if IMODE == 4
+  #ifdef TOUCH_LIGHT
     vec3 L = normalize(vec3(uMouse - uv, .35));
   #else
     vec3 L = normalize(vec3(cos(uLightAng), sin(uLightAng), .75));
@@ -232,17 +375,15 @@ vec3 scene(vec2 uv0){
   col *= .62 + .55 * diff;
   col += spec * uShine * (.35 + .65 * dot(col, vec3(.3333)));
 #endif
-#if IMODE == 4
-  vec2 dl = uv - uMouse;
-  float pool = exp(-dot(dl, dl) / (uIRad * uIRad * 1.5));
-  col *= mix(1., .5 + 1.2 * pool, clamp(uIStr, 0., 1.));
-#endif
+  col = touchPost(col, uv);
 
   col *= 1. - clamp(hole, 0., 1.);
   col += uAccent * gRip * .16;
+${MASK_COMPOSITE}
   return col;
 }
 `;
+}
 
 const FINISH = /* glsl */`
 vec3 finish(vec3 col, vec2 uv){
@@ -273,8 +414,14 @@ vec3 finish(vec3 col, vec2 uv){
 
 void main(){
   vec2 uv = (gl_FragCoord.xy - .5 * uRes) / uRes.y;
-#ifdef ABERR
-  vec2 o = uv * uAber * .035;
+#if defined(ABERR) || defined(TOUCH_PRISM)
+  vec2 o = vec2(0.);
+  #ifdef ABERR
+    o += uv * uAber * .035;
+  #endif
+  #ifdef TOUCH_PRISM
+    o += touchPrism(uv);
+  #endif
   vec3 col = vec3(scene(uv + o).r, scene(uv).g, scene(uv - o).b);
 #else
   vec3 col = scene(uv);
@@ -286,7 +433,6 @@ void main(){
 /* ─────────────────────────── feature flags ─────────────────────────── */
 
 export interface ShaderFlags {
-  imode: number;
   ripples: boolean;
   sym: boolean;
   pix: boolean;
@@ -299,50 +445,68 @@ export interface ShaderFlags {
   glow: boolean;
   tone: boolean;
   hue: boolean;
-  overlay: boolean;
-  blend: number;
+  touchLight: boolean;
+  touchPrism: boolean;
+  mask: boolean;
+  maskSmoke: boolean;
+  maskParticles: boolean;
+  maskPattern: number;
+  maskWarp: boolean;
+  maskBevel: boolean;
+  maskHue: boolean;
 }
 
-const IMODE_INDEX: Record<(typeof INTERACTION_MODES)[number], number> = {
-  Off: 0, Stir: 1, Attract: 2, Repel: 3, Light: 4,
-};
-
 export function flagsOf(p: ShaderProject): ShaderFlags {
-  const imode = IMODE_INDEX[p.interaction];
+  const touch = touchFlags(activeRules(p));
+  const m = p.mask;
+  const mask = m.enabled;
   return {
-    imode,
     ripples: p.ripples,
     sym: p.symmetry >= 2,
     pix: p.pixelate >= 8,
     warp: p.warp > 0,
     swirl: p.swirl !== 0,
-    relief: p.relief > 0 || imode === 4,
+    relief: p.relief > 0 || touch.light || (mask && m.bevel > 0),
     aber: p.aberration > 0,
     scan: p.scanlines > 0,
     poster: p.posterize >= 2,
     glow: p.glow > 0,
     tone: p.tone > 0,
     hue: p.hue !== 0,
-    overlay: p.overlay.enabled,
-    blend: Math.max(0, BLEND_MODES.indexOf(p.overlay.blend)),
+    touchLight: touch.light,
+    touchPrism: touch.prism,
+    mask,
+    maskSmoke: mask && m.smoke > 0,
+    maskParticles: mask && m.particles > 0,
+    maskPattern: mask ? Math.max(0, MASK_PATTERNS.indexOf(m.pattern)) : 0,
+    maskWarp: mask && (m.distort > 0 || m.flow > 0),
+    maskBevel: mask && m.bevel > 0,
+    maskHue: mask && m.innerHue !== 0,
   };
 }
 
 /** Changes whenever the GLSL itself has to be rebuilt (not for plain slider moves). */
 export function programKey(p: ShaderProject): string {
   const f = flagsOf(p);
-  const bits = [f.ripples, f.sym, f.pix, f.warp, f.swirl, f.relief, f.aber, f.scan, f.poster, f.glow, f.tone, f.hue, f.overlay]
-    .map((b) => (b ? "1" : "0")).join("");
-  return `${p.generator}|${f.overlay ? p.overlay.generator : "-"}|${f.imode}|${f.blend}|${bits}`;
+  const bits = [
+    f.ripples, f.sym, f.pix, f.warp, f.swirl, f.relief, f.aber, f.scan, f.poster, f.glow, f.tone, f.hue,
+    f.mask, f.maskSmoke, f.maskParticles, f.maskWarp, f.maskBevel, f.maskHue,
+  ].map((b) => (b ? "1" : "0")).join("");
+  const stack = stackSignature(stackOrder(p.layers), f.mask);
+  return `${p.generator}|${touchSignature(activeRules(p))}|${stack}|${f.maskPattern}|${bits}`;
 }
 
-function fieldSource(name: string, id: ShaderProject["generator"]): string {
-  return GENERATOR_MAP[id].glsl.split("FIELD").join(name);
+function fieldSource(id: GeneratorId): string {
+  return GENERATOR_MAP[id].glsl.split("FIELD").join(fieldFnName(id));
 }
 
 export function buildFragmentSource(p: ShaderProject): string {
   const f = flagsOf(p);
-  const defs: string[] = [`#define IMODE ${f.imode}`, `#define BLEND ${f.blend}`];
+  const rules = activeRules(p);
+  const layers = stackOrder(p.layers);
+  const stack = buildStackGlsl(layers, p.generator, f.mask);
+
+  const defs: string[] = [`#define MPAT ${f.maskPattern}`];
   if (f.ripples) defs.push("#define RIPPLES");
   if (f.sym) defs.push("#define SYM");
   if (f.pix) defs.push("#define PIX");
@@ -355,21 +519,29 @@ export function buildFragmentSource(p: ShaderProject): string {
   if (f.glow) defs.push("#define GLOW");
   if (f.tone) defs.push("#define TONE");
   if (f.hue) defs.push("#define HUE");
-  if (f.overlay) defs.push("#define LAYER2");
+  if (f.touchLight) defs.push("#define TOUCH_LIGHT");
+  if (f.touchPrism) defs.push("#define TOUCH_PRISM");
+  if (f.mask) defs.push("#define MASK");
+  if (f.maskSmoke) defs.push("#define MSMOKE");
+  if (f.maskParticles) defs.push("#define MPART");
+  if (f.maskWarp) defs.push("#define MWARP");
+  if (f.maskBevel) defs.push("#define MBEVEL");
+  if (f.maskHue) defs.push("#define MHUE");
 
   const parts = [
     "#version 300 es\nprecision highp float;\nprecision highp int;\nout vec4 fragColor;",
     defs.join("\n"),
     UNIFORMS,
     COMMON,
+    STACK_GLSL_HELPERS,
+    blendLibrary(stack.modes),
+    f.mask ? MASK_GLSL : "",
+    buildTouchGlsl(rules),
     PIPELINE,
-    fieldSource("fieldA", p.generator),
+    ...stack.generators.map(fieldSource),
+    buildScene(stack.code, f.mask),
+    FINISH,
   ];
-  if (f.overlay) {
-    parts.push(fieldSource("fieldB", p.overlay.generator));
-    parts.push(LAYER_BLEND);
-  }
-  parts.push(SCENE, FINISH);
   return parts.join("\n");
 }
 
@@ -378,13 +550,29 @@ export function buildFragmentSource(p: ShaderProject): string {
 export type UniformValue = number | number[];
 export type UniformEntry = [name: string, value: UniformValue];
 
+function paletteArrays(p: ShaderProject): { colors: number[]; positions: number[] } {
+  const n = Math.max(2, Math.min(6, p.palette.length));
+  const colors: number[] = [];
+  const positions: number[] = [];
+  for (let i = 0; i < 6; i++) {
+    colors.push(...hexToRgb(p.palette[Math.min(i, p.palette.length - 1)] ?? "#000000"));
+    positions.push(i < n ? (p.palettePositions[i] ?? i / (n - 1)) : 1);
+  }
+  return { colors, positions };
+}
+
 /** Uniforms that only change when the project changes. */
 export function staticUniforms(p: ShaderProject): UniformEntry[] {
-  const pal: number[] = [];
-  for (let i = 0; i < 6; i++) pal.push(...hexToRgb(p.palette[Math.min(i, p.palette.length - 1)] ?? "#000000"));
+  const pal = paletteArrays(p);
+  const rules = activeRules(p);
+  const ca: number[] = [];
+  for (let i = 0; i < MAX_RULES; i++) {
+    const rule = rules[i];
+    ca.push(...(rule ? ruleUniform(rule, p.interactionStrength, p.interactionRadius) : [0, 0.2, 0, 0]));
+  }
+  const m = p.mask;
   return [
     ["uK", [...p.knobs]],
-    ["uK2", [...p.overlay.knobs]],
     ["uScale", p.scale],
     ["uWarp", p.warp],
     ["uWarpScale", p.warpScale],
@@ -392,9 +580,12 @@ export function staticUniforms(p: ShaderProject): UniformEntry[] {
     ["uSym", p.symmetry],
     ["uPix", p.pixelate],
     ["uSeed", p.seed],
-    ["uPal[0]", pal],
+    ["uPal[0]", pal.colors],
+    ["uPalPos[0]", pal.positions],
     ["uPalN", Math.max(2, Math.min(6, p.palette.length))],
+    ["uPalSoft", p.paletteSoft],
     ["uAccent", hexToRgb(p.accent)],
+    ["uCanvas", hexToRgb(p.canvas)],
     ["uPalRep", p.paletteRepeat],
     ["uContrast", p.contrast],
     ["uExposure", p.exposure],
@@ -410,12 +601,16 @@ export function staticUniforms(p: ShaderProject): UniformEntry[] {
     ["uGrain", p.grain],
     ["uScan", p.scanlines],
     ["uPost", p.posterize],
-    ["uIStr", p.interactionStrength],
-    ["uIRad", p.interactionRadius],
-    ["uOp2", p.overlay.opacity],
-    ["uScale2", p.overlay.scale],
-    ["uSpd2", p.overlay.speed],
-    ["uShift2", p.overlay.shift],
+    ["uCA[0]", ca],
+    ...stackUniforms(stackOrder(p.layers)),
+    ["uM0", [m.scale, m.x, m.y, m.rotation * RAD]],
+    ["uM1", [m.follow, m.breathe, m.grow, m.edge]],
+    ["uM2", [SDF_SPAN, m.smoke, m.smokeScale, m.bevel]],
+    ["uM3", [m.glow, m.halo, m.outline, m.distort]],
+    ["uM4", [m.particles, m.particleSize, m.particleSpeed, m.flow]],
+    ["uM5", [m.patternAmount, m.patternScale, m.patternAngle * RAD, m.patternSpeed]],
+    ["uM6", [m.ghost, m.innerBoost, m.innerHue * RAD, 0]],
+    ["uMBg", hexToRgb(m.background)],
   ];
 }
 
@@ -430,6 +625,10 @@ export interface MotionConfig {
   idleDrift: boolean;
   ripples: boolean;
   playing: boolean;
+  /** pointer smoothing rate */
+  follow: number;
+  /** seconds a trail point lives */
+  trail: number;
 }
 
 export function motionOf(p: ShaderProject): MotionConfig {
@@ -442,5 +641,7 @@ export function motionOf(p: ShaderProject): MotionConfig {
     idleDrift: p.idleDrift,
     ripples: p.ripples,
     playing: p.playing,
+    follow: p.touch.response,
+    trail: p.touch.trail,
   };
 }
