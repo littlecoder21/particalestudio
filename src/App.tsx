@@ -15,6 +15,7 @@ import { additionalPresets } from "./additionalPresets";
 import { generatorLibrary, type GeneratorCategory } from "./generators";
 import { availableEffects, isParticleEffect, type ParticleEffect } from "./effects";
 import { generateCodeExport } from "./codeExport";
+import { readDesignerLibrary, sampleGeometry, validateGeometryDocument, type GeometryDocument } from "./geometry/model";
 import {
   parseSvgSource,
   sampleSvgSource,
@@ -134,7 +135,7 @@ function isParticleSettings(value: unknown): value is ParticleSettings {
 
   return (
     inRange("count", 80, 1200) &&
-    isOneOf("emitter", ["Point", "Circle", "Ring", "Line", "Fountain", "SVG"]) &&
+    isOneOf("emitter", ["Point", "Circle", "Ring", "Line", "Fountain", "SVG", "Designer"]) &&
     isOneOf("generator", ["Source Shape", ...generatorLibrary.flatMap((group) => group.generators)]) &&
     Array.isArray(candidate.effects) && candidate.effects.every(isParticleEffect) &&
     isOneOf("motion", ["Off", "Float", "Orbit", "Flow", "Burst"]) &&
@@ -236,6 +237,7 @@ function readSavedProject(): {
   svgSources: SvgSource[];
   activeSvgIndex: number;
   morphSequence: string[];
+  designerDocument: GeometryDocument;
 } | null {
   try {
     const saved = localStorage.getItem("particle-studio-project");
@@ -256,6 +258,15 @@ function readSavedProject(): {
       project.activeSvgIndex >= 0 && project.activeSvgIndex < svgSources.length
       ? project.activeSvgIndex
       : 0;
+    const designerLibrary = readDesignerLibrary();
+    let designerDocument = designerLibrary.documents[designerLibrary.activeIndex];
+    if (project.designerDocument !== undefined) {
+      try {
+        designerDocument = validateGeometryDocument(project.designerDocument);
+      } catch (error) {
+        console.error("Saved designer geometry is invalid; using the current library design.", error);
+      }
+    }
     return {
       preset: typeof project.preset === "string" ? project.preset : "Stardust",
       settings,
@@ -268,6 +279,7 @@ function readSavedProject(): {
           resolveSvgSelection(project.morphSvgSelection, svgSources)
           ? [project.morphSvgSelection]
           : [],
+      designerDocument,
     };
   } catch (error) {
     console.error("Could not load the saved particle project.", error);
@@ -361,7 +373,13 @@ function App() {
   const settingsRef = useRef(initialSettings);
   const svgPointsRef = useRef<SvgSamplePoint[]>([]);
   const svgSequencePointsRef = useRef<readonly (readonly SvgSamplePoint[])[]>([]);
+  const designerPointsRef = useRef<SvgSamplePoint[]>([]);
   const [savedProject] = useState(readSavedProject);
+  const [designerDocument, setDesignerDocument] = useState<GeometryDocument>(() => {
+    if (savedProject) return savedProject.designerDocument;
+    const library = readDesignerLibrary();
+    return library.documents[library.activeIndex];
+  });
   const [settings, setSettings] = useState(savedProject?.settings ?? initialSettings);
   const [svgSources, setSvgSources] = useState<SvgSource[]>(savedProject?.svgSources ?? []);
   const [activeSvgIndex, setActiveSvgIndex] = useState(savedProject?.activeSvgIndex ?? 0);
@@ -374,6 +392,7 @@ function App() {
   );
   const [svgPoints, setSvgPoints] = useState<SvgSamplePoint[]>([]);
   const [svgSequencePoints, setSvgSequencePoints] = useState<readonly (readonly SvgSamplePoint[])[]>([]);
+  const [designerPoints, setDesignerPoints] = useState<SvgSamplePoint[]>([]);
   const [isSamplingSvg, setIsSamplingSvg] = useState(false);
   const [isSamplingSvgSequence, setIsSamplingSvgSequence] = useState(false);
   const [svgError, setSvgError] = useState("");
@@ -400,8 +419,8 @@ function App() {
   const recordIntervalRef = useRef<number | null>(null);
   const recordStartedAtRef = useRef(0);
   const generatedCode = useMemo(
-    () => generateCodeExport(settings, svgPoints, svgSequencePoints),
-    [settings, svgPoints, svgSequencePoints],
+    () => generateCodeExport(settings, svgPoints, svgSequencePoints, designerPoints),
+    [settings, svgPoints, svgSequencePoints, designerPoints],
   );
 
   useEffect(() => {
@@ -417,6 +436,54 @@ function App() {
   }, [svgSequencePoints]);
 
   useEffect(() => {
+    designerPointsRef.current = designerPoints;
+  }, [designerPoints]);
+
+  useEffect(() => {
+    setDesignerPoints(sampleGeometry(designerDocument, settings.count));
+  }, [designerDocument, settings.count]);
+
+  useEffect(() => {
+    const saved = (event: Event) => {
+      try {
+        const detail = (event as CustomEvent<unknown>).detail;
+        const document = validateGeometryDocument(detail);
+        setDesignerDocument(document);
+        setIsSaved(false);
+      } catch (error) {
+        console.error("Could not use the saved designer geometry.", error);
+        setSvgError(error instanceof Error ? error.message : "The saved designer geometry is invalid.");
+      }
+    };
+    const useInParticles = (event: Event) => {
+      let document = designerDocument;
+      try {
+        const detail = (event as CustomEvent<unknown>).detail;
+        if (detail !== undefined) document = validateGeometryDocument(detail);
+      } catch (error) {
+        console.error("Could not use the saved designer geometry.", error);
+        setSvgError(error instanceof Error ? error.message : "The saved designer geometry is invalid.");
+        return;
+      }
+      if (!document.shapes.some((shape) => shape.visible && shape.contours.some((contour) => contour.points.length > 1))) {
+        setSvgError("Create or import a shape in Shape Designer first.");
+        return;
+      }
+      setDesignerDocument(document);
+      setSettings((current) => ({ ...current, emitter: "Designer", generator: "Source Shape" }));
+      setActiveSection("create");
+      setActivePreset("");
+      setIsSaved(false);
+    };
+    window.addEventListener("particle-studio-designer-saved", saved);
+    window.addEventListener("particle-studio-use-designer", useInParticles);
+    return () => {
+      window.removeEventListener("particle-studio-designer-saved", saved);
+      window.removeEventListener("particle-studio-use-designer", useInParticles);
+    };
+  }, [designerDocument]);
+
+  useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     return startParticleEngine(
@@ -427,7 +494,8 @@ function App() {
         setParticleCount(nextParticleCount);
       },
       () => svgPointsRef.current,
-        () => svgSequencePointsRef.current,
+      () => svgSequencePointsRef.current,
+      () => designerPointsRef.current,
     );
   }, []);
 
@@ -633,7 +701,7 @@ function App() {
   };
 
   const downloadConfig = () => {
-    const blob = new Blob([JSON.stringify({ version: 6, preset: activePreset, settings, svgSources, activeSvgIndex, morphSequence }, null, 2)], {
+    const blob = new Blob([JSON.stringify({ version: 7, preset: activePreset, settings, svgSources, activeSvgIndex, morphSequence, designerDocument }, null, 2)], {
       type: "application/json",
     });
     const url = URL.createObjectURL(blob);
@@ -653,6 +721,7 @@ function App() {
         svgSources,
         activeSvgIndex,
         morphSequence,
+        designerDocument,
       }));
       setIsSaved(true);
       setNotice("Project saved on this device");
@@ -978,17 +1047,26 @@ function App() {
             <div className="control-divider" />
             <ChoiceGroup<Emitter>
               label="Source shape (Source Shape generator)"
-              options={["Point", "Circle", "Ring", "Line", "Fountain", "SVG"]}
+              options={["Point", "Circle", "Ring", "Line", "Fountain", "SVG", "Designer"]}
               value={settings.emitter}
               onChange={(value) => {
                 if (value === "SVG" && !svgSource) {
                   setSvgError("Import an SVG file before choosing the SVG source.");
                   return;
                 }
-                update("emitter", value);
+                if (value === "Designer" && !designerDocument.shapes.some((shape) => shape.visible && shape.contours.some((contour) => contour.points.length > 1))) {
+                  setSvgError("Create or import a shape in Shape Designer before choosing this source.");
+                  return;
+                }
+                if (value === "Designer") {
+                  setSettings((current) => ({ ...current, emitter: value, generator: "Source Shape" }));
+                  setIsSaved(false);
+                } else {
+                  update("emitter", value);
+                }
               }}
             />
-            <p className="field-help">Choose <b>Use source shape</b> in the Generator section for this source to control the formation.</p>
+            <p className="field-help">Choose <b>Use source shape</b> in the Generator section to use the selected formation. Designer source: <b>{designerDocument.name}</b>.</p>
             <RangeControl label="Particle count" value={settings.count} min={80} max={1200} step={20} onChange={(value) => update("count", value)} />
             <RangeControl label="Spread" value={settings.spread} min={10} max={100} step={1} suffix="%" onChange={(value) => update("spread", value)} />
           </div>

@@ -2,15 +2,18 @@ import { Suspense, lazy, useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import App from "./App";
 import ModeSwitch, { type StudioMode } from "./ModeSwitch";
+import type { GeometryDocument } from "./geometry/model";
 
 // The shader studio is a separate chunk: it only loads the first time it is opened.
 const ShaderStudio = lazy(() => import("./shader/ShaderStudio"));
+const ShapeDesigner = lazy(() => import("./designer/ShapeDesigner"));
 
 const MODE_KEY = "particle-studio-mode";
 
 function readMode(): StudioMode {
   try {
-    return localStorage.getItem(MODE_KEY) === "shaders" ? "shaders" : "particles";
+    const saved = localStorage.getItem(MODE_KEY);
+    return saved === "shaders" || saved === "designer" ? saved : "particles";
   } catch {
     return "particles";
   }
@@ -25,6 +28,7 @@ export default function Root() {
   const [mode, setMode] = useState<StudioMode>(readMode);
   const [shadersOpened, setShadersOpened] = useState(mode === "shaders");
   const [switchHost, setSwitchHost] = useState<HTMLElement | null>(null);
+  const [designerRequest, setDesignerRequest] = useState<{ id: number; document: GeometryDocument } | null>(null);
 
   useEffect(() => {
     try {
@@ -58,9 +62,29 @@ export default function Root() {
       {shadersOpened && (
         <div className="mode-pane" hidden={mode !== "shaders"}>
           <Suspense fallback={<div className="studio shader-loading">Loading shader studio…</div>}>
-            <ShaderStudio active={mode === "shaders"} modeSwitch={<ModeSwitch mode={mode} onChange={setMode} />} />
+            <ShaderStudio
+              active={mode === "shaders"}
+              modeSwitch={<ModeSwitch mode={mode} onChange={setMode} />}
+              designerRequest={designerRequest}
+            />
           </Suspense>
         </div>
+      )}
+      {mode === "designer" && (
+        <Suspense fallback={<div className="studio shader-loading">Loading Shape Designer…</div>}>
+          <ShapeDesigner
+            onBack={() => setMode("particles")}
+            onUseInParticles={(document) => {
+              window.dispatchEvent(new CustomEvent("particle-studio-use-designer", { detail: document }));
+              setMode("particles");
+            }}
+            onUseInShaders={(document) => {
+              setDesignerRequest({ id: Date.now(), document });
+              setShadersOpened(true);
+              setMode("shaders");
+            }}
+          />
+        </Suspense>
       )}
       {switchHost && createPortal(<ModeSwitch mode={mode} onChange={setMode} />, switchHost)}
     </>

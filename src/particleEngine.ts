@@ -2,7 +2,7 @@ import type { SvgSamplePoint } from "./svgSource";
 import { getGeneratorPoint, type GeneratorType } from "./generators";
 import type { ParticleEffect } from "./effects";
 
-export type Emitter = "Point" | "Circle" | "Ring" | "Line" | "Fountain" | "SVG";
+export type Emitter = "Point" | "Circle" | "Ring" | "Line" | "Fountain" | "SVG" | "Designer";
 export type Motion = "Off" | "Float" | "Orbit" | "Flow" | "Burst";
 export type ParticleShape =
   | "Circle" | "Square" | "Diamond" | "Star" | "Triangle" | "Pentagon"
@@ -220,6 +220,7 @@ export function startParticleEngine(
   onFrame: (fps: number, particleCount: number) => void,
   getSvgPoints: () => readonly SvgSamplePoint[] = () => [],
   getSvgSequencePoints: () => readonly (readonly SvgSamplePoint[])[] = () => [],
+  getDesignerPoints: () => readonly SvgSamplePoint[] = () => [],
 ): () => void {
   const context = canvas.getContext("2d", { alpha: true });
   if (!context) throw new Error("This browser does not support Canvas 2D rendering.");
@@ -294,7 +295,8 @@ export function startParticleEngine(
       vx = Math.cos(angle) * speed;
       vy = Math.sin(angle) * speed;
     } else switch (settings.emitter) {
-      case "SVG": {
+      case "SVG":
+      case "Designer": {
         const point = svgPoints[Math.floor(Math.random() * svgPoints.length)];
         if (point) {
           const scale = Math.min(width, height) * 0.72;
@@ -368,7 +370,7 @@ export function startParticleEngine(
         particle.x = generated.x;
         particle.y = generated.y;
         particle.depth = generated.depth;
-      } else if (settings.emitter === "SVG" && svgPoints.length > 0) {
+      } else if ((settings.emitter === "SVG" || settings.emitter === "Designer") && svgPoints.length > 0) {
         const point = svgPoints[Math.floor((index * svgPoints.length) / particles.length)];
         particle.x = width * 0.5 + point.x * scale;
         particle.y = height * 0.5 + point.y * scale;
@@ -379,12 +381,13 @@ export function startParticleEngine(
 
   const syncCount = (
     settings: ParticleSettings,
-    svgPoints: readonly SvgSamplePoint[],
     svgSequencePoints: readonly (readonly SvgSamplePoint[])[],
+    sourcePoints: readonly SvgSamplePoint[],
   ) => {
     const count = Math.min(settings.count, 1800);
     const countChanged = count !== lastCount;
-    const shouldRespawn = settings.emitter !== lastEmitter || settings.generator !== lastGenerator || svgPoints !== lastSvgPoints;
+    const shouldRespawn = settings.emitter !== lastEmitter || settings.generator !== lastGenerator ||
+      sourcePoints !== lastSvgPoints;
     const resetToInitial = settings.motion === "Off" && lastMotion !== "Off";
     const populationChanged = settings.populationMode !== lastPopulationMode;
     const initializeShrink = settings.populationMode === "Shrink" &&
@@ -411,7 +414,7 @@ export function startParticleEngine(
     lastGenerator = settings.generator;
     lastMotion = settings.motion;
     lastPopulationMode = settings.populationMode;
-    lastSvgPoints = svgPoints;
+    lastSvgPoints = sourcePoints;
     if (populationChanged && settings.populationMode === "Grow") particles.length = 0;
     if (settings.populationMode === "Steady" || settings.populationMode === "Shrink") {
       while (particles.length > count) particles.pop();
@@ -421,14 +424,14 @@ export function startParticleEngine(
       (settings.populationMode === "Steady" || initializeShrink)
     ) {
       const particle: Particle = { x: 0, y: 0, vx: 0, vy: 0, age: 0, life: 0, size: 1, phase: 0, sourceColor: null, depth: 1, colorIndex: 0, morphAlpha: 1 };
-      spawn(particle, settings, svgPoints, particles.length);
+      spawn(particle, settings, sourcePoints, particles.length);
       particles.push(particle);
     }
     if (settings.populationMode === "Grow" && particles.length > count) particles.length = count;
     if (settings.motion === "Off") {
-      arrangeInitialForm(settings, svgPoints);
+      arrangeInitialForm(settings, sourcePoints);
     } else if (shouldRespawn) {
-      for (const particle of particles) spawn(particle, settings, svgPoints);
+      for (const particle of particles) spawn(particle, settings, sourcePoints);
     }
   };
 
@@ -599,8 +602,10 @@ export function startParticleEngine(
   const animate = (time: number) => {
     const settings = getSettings();
     const svgPoints = getSvgPoints();
+    const designerPoints = getDesignerPoints();
+    const sourcePoints = settings.emitter === "Designer" ? designerPoints : svgPoints;
     const svgSequencePoints = getSvgSequencePoints();
-    syncCount(settings, svgPoints, svgSequencePoints);
+    syncCount(settings, svgSequencePoints, sourcePoints);
     const delta = Math.min((time - (previousTime || time)) / 1000, 0.04);
     previousTime = time;
 
@@ -613,7 +618,7 @@ export function startParticleEngine(
         if (settings.populationMode === "Grow") {
           for (let amount = 0; amount < populationChange && particles.length < settings.count; amount += 1) {
             const particle: Particle = { x: 0, y: 0, vx: 0, vy: 0, age: 0, life: 0, size: 1, phase: 0, sourceColor: null, depth: 1, colorIndex: 0, morphAlpha: 1 };
-            spawn(particle, settings, svgPoints, particles.length);
+            spawn(particle, settings, sourcePoints, particles.length);
             particles.push(particle);
           }
         } else {
@@ -872,7 +877,9 @@ export function startParticleEngine(
     context.globalCompositeOperation = "lighter";
     drawNetwork(settings);
     drawConnections(settings);
-    if (settings.generator !== "Source Shape" || settings.emitter !== "SVG" || svgPoints.length > 0) {
+    if (settings.generator !== "Source Shape" ||
+        (settings.emitter !== "SVG" || svgPoints.length > 0) &&
+        (settings.emitter !== "Designer" || designerPoints.length > 0)) {
       for (const particle of particles) drawParticle(particle, settings, showTrails ? 0.85 : 1, time);
     }
     context.globalCompositeOperation = "source-over";

@@ -16,6 +16,7 @@
  * maths: moving those sliders never re-processes the image.
  */
 import { MAX_TEXT_LENGTH, MAX_TEXT_LINES, type MaskShapeId, type MaskSource, type ShaderMask, type TextMaskSource } from "./types";
+import type { GeometryDocument } from "../geometry/model";
 
 export const MASK_SIZE = 512;
 export const SDF_RANGE_PX = 40;
@@ -263,6 +264,34 @@ export function shapeField(id: MaskShapeId): MaskField {
   return remember(key, fieldFromAlpha(ctx, MASK_SIZE));
 }
 
+function designerField(document: GeometryDocument): MaskField {
+  const key = `designer:${JSON.stringify(document)}`;
+  const cached = fieldCache.get(key);
+  if (cached) return cached;
+  const { ctx } = makeCanvas(MASK_SIZE);
+  const scale = (MASK_SIZE * (1 - 2 * PAD)) / Math.max(document.width, document.height);
+  const offsetX = (MASK_SIZE - document.width * scale) / 2;
+  const offsetY = (MASK_SIZE - document.height * scale) / 2;
+  ctx.save();
+  ctx.setTransform(scale, 0, 0, scale, offsetX, offsetY);
+  ctx.fillStyle = "#fff";
+  for (const shape of document.shapes) {
+    if (!shape.visible) continue;
+    ctx.beginPath();
+    for (const contour of shape.contours) {
+      if (!contour.closed || contour.points.length < 3) continue;
+      const [first, ...rest] = contour.points;
+      if (!first) continue;
+      ctx.moveTo(first.x, first.y);
+      for (const point of rest) ctx.lineTo(point.x, point.y);
+      ctx.closePath();
+    }
+    ctx.fill("evenodd");
+  }
+  ctx.restore();
+  return remember(key, fieldFromAlpha(ctx, MASK_SIZE));
+}
+
 function textField(source: TextMaskSource): MaskField {
   const key = `text:${JSON.stringify(source)}`;
   const cached = fieldCache.get(key);
@@ -340,6 +369,7 @@ async function fieldFromDataUrl(url: string): Promise<MaskField> {
 export async function sourceField(source: MaskSource): Promise<MaskField> {
   if (source.kind === "shape") return shapeField(source.id);
   if (source.kind === "text") return textField(source);
+  if (source.kind === "designer") return designerField(source.document);
   return fieldFromDataUrl(source.data);
 }
 
@@ -573,7 +603,9 @@ const pixelCache = new Map<string, MaskPixels>();
 
 function sourceKey(source: MaskSource): string {
   if (source.kind === "shape") return `shape:${source.id}`;
-  return source.kind === "text" ? `text:${JSON.stringify(source)}` : source.data;
+  if (source.kind === "text") return `text:${JSON.stringify(source)}`;
+  if (source.kind === "designer") return `designer:${JSON.stringify(source.document)}`;
+  return source.data;
 }
 
 /** Cached pixel build — the threshold slider calls this many times a second. */
@@ -595,6 +627,7 @@ export function maskPixelsSync(mask: ShaderMask): MaskPixels | null {
   if (!mask.enabled) return null;
   if (mask.source.kind === "shape") return maskPixelsFor(shapeField(mask.source.id), mask.source, mask.threshold, mask.invert);
   if (mask.source.kind === "text") return maskPixelsFor(textField(mask.source), mask.source, mask.threshold, mask.invert);
+  if (mask.source.kind === "designer") return maskPixelsFor(designerField(mask.source.document), mask.source, mask.threshold, mask.invert);
   const field = fieldCache.get(mask.source.data);
   return field ? maskPixelsFor(field, mask.source, mask.threshold, mask.invert) : null;
 }

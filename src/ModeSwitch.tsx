@@ -1,4 +1,4 @@
-export type StudioMode = "particles" | "shaders";
+export type StudioMode = "particles" | "shaders" | "designer";
 
 interface ModeSwitchProps {
   mode: StudioMode;
@@ -28,6 +28,16 @@ export default function ModeSwitch({ mode, onChange }: ModeSwitchProps) {
       >
         <span aria-hidden="true">◐</span>
         <b>Shaders</b>
+      </button>
+      <button
+        type="button"
+        role="tab"
+        aria-selected={mode === "designer"}
+        className={mode === "designer" ? "active" : ""}
+        onClick={() => onChange("designer")}
+      >
+        <span aria-hidden="true">⌘</span>
+        <b>Designer</b>
       </button>
     </div>
   );

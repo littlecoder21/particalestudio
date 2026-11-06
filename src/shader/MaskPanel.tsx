@@ -1,4 +1,5 @@
-import { useRef, useState, type DragEvent } from "react";
+import { useEffect, useRef, useState, type DragEvent } from "react";
+import { readDesignerLibrary } from "../geometry/model";
 import { ChoiceGroup, ColorField, RangeControl, SoftTip, SubTabs, ToggleRow } from "./controls";
 import { GENERATORS } from "./generators";
 import { MASK_LOOKS } from "./looks";
@@ -85,11 +86,18 @@ function RegionFieldControl({
 export default function MaskPanel({ project, busy, onMask, onAddField, onImport, onApplyLook }: MaskPanelProps) {
   const [view, setView] = useState<View>("shape");
   const [dragOver, setDragOver] = useState(false);
+  const [designerLibrary, setDesignerLibrary] = useState(readDesignerLibrary);
   const [insideGenerator, setInsideGenerator] = useState<GeneratorId>("mesh");
   const [outsideGenerator, setOutsideGenerator] = useState<GeneratorId>("aurora");
   const fileRef = useRef<HTMLInputElement>(null);
   const m = project.mask;
   const stackFull = project.layers.length >= MAX_LAYERS;
+
+  useEffect(() => {
+    const refresh = () => setDesignerLibrary(readDesignerLibrary());
+    window.addEventListener("particle-studio-designer-saved", refresh);
+    return () => window.removeEventListener("particle-studio-designer-saved", refresh);
+  }, []);
 
   const slider = (key: keyof ShaderMask, rangeKey: keyof typeof RANGES, label: string, display?: string, reset?: number) => {
     const r = RANGES[rangeKey];
@@ -125,8 +133,14 @@ export default function MaskPanel({ project, busy, onMask, onAddField, onImport,
   return (
     <>
       <ToggleRow
-        title="Image mask"
-        description={m.enabled ? "The shader only fills the silhouette" : "Turn any shape, logo or image into a shader window"}
+        title={project.geometryMode ? "Geometry as shader field" : "Image mask"}
+        description={
+          project.geometryMode
+            ? "Your shape drives the base shader field; layers, colour, motion and effects stay editable"
+            : m.enabled
+              ? "The shader only fills the silhouette"
+              : "Turn any shape, logo or image into a shader window"
+        }
         enabled={m.enabled}
         onChange={(enabled) => onMask({ enabled })}
       />
@@ -153,6 +167,24 @@ export default function MaskPanel({ project, busy, onMask, onAddField, onImport,
               );
             })}
           </div>
+
+          <span className="control-label">{project.geometryMode ? "Replace geometry source" : "Designed geometry"}</span>
+          <button
+            type="button"
+            className="svg-upload-button"
+            disabled={!designerLibrary.documents[designerLibrary.activeIndex]?.shapes.some((shape) => shape.visible && shape.contours.some((contour) => contour.closed))}
+            onClick={() => {
+              const document = designerLibrary.documents[designerLibrary.activeIndex];
+              if (document) onMask({ enabled: true, source: { kind: "designer", document } });
+            }}
+          >
+            Use “{designerLibrary.documents[designerLibrary.activeIndex]?.name ?? "saved design"}” as {project.geometryMode ? "shader field" : "mask"}
+          </button>
+          <p className="field-help">
+            {project.geometryMode
+              ? "The geometry distance field is the shader’s actual base content, not a procedural preset clipped by a mask."
+              : "The latest saved Shape Designer geometry is converted to the shader’s distance-field texture."}
+          </p>
 
           <span className="control-label">{m.source.kind === "text" ? "Replace the text source" : "Your own image"}</span>
           {m.source.kind === "text" && <p className="field-help">The active mask is text. Edit it in the <b>Text</b> tab, or import an image to replace it.</p>}

@@ -13,6 +13,7 @@ export function generateCodeExport(
   settings: ParticleSettings,
   svgPoints: readonly SvgSamplePoint[] = [],
   svgSequencePoints: readonly (readonly SvgSamplePoint[])[] = [],
+  designerPoints: readonly SvgSamplePoint[] = [],
 ): CodeExportFiles {
   const config = JSON.stringify({
     count: settings.count,
@@ -61,7 +62,7 @@ export function generateCodeExport(
     ambientLight: settings.ambientLight,
     lightColor: settings.lightColor,
     customShapePath: settings.customShapePath,
-    svgPoints: settings.emitter === "SVG" ? svgPoints : [],
+    svgPoints: settings.emitter === "Designer" ? designerPoints : settings.emitter === "SVG" ? svgPoints : [],
     svgSequencePoints: settings.emitter === "SVG" ? svgSequencePoints : [],
   }, null, 2).replace(/</g, "\\u003c");
 
@@ -281,7 +282,7 @@ function setSourcePosition(particle, index) {
     particle.depth = 1;
     particle.x = centerX + (index / Math.max(CONFIG.count - 1, 1) * 2 - 1) * spread * width * .15;
     particle.y = centerY + height * .18;
-  } else if (CONFIG.emitter === "SVG" && CONFIG.svgPoints.length > 0) {
+  } else if ((CONFIG.emitter === "SVG" || CONFIG.emitter === "Designer") && CONFIG.svgPoints.length > 0) {
     particle.depth = 1;
     const point = CONFIG.svgPoints[Math.floor(index * CONFIG.svgPoints.length / CONFIG.count)];
     const scale = Math.min(width, height) * .72;
@@ -336,7 +337,7 @@ function makeParticle(index = Math.floor(Math.random() * Math.max(CONFIG.count, 
     particle.y = height / 2 + height * .18;
     particle.vx = random(-1, 1) * speed * .45;
     particle.vy = -Math.abs(random(.5, 1.5) * speed);
-  } else if (CONFIG.emitter === "SVG" && CONFIG.svgPoints.length > 0) {
+  } else if ((CONFIG.emitter === "SVG" || CONFIG.emitter === "Designer") && CONFIG.svgPoints.length > 0) {
     const point = CONFIG.svgPoints[Math.floor(Math.random() * CONFIG.svgPoints.length)];
     const scale = Math.min(width, height) * .72;
     particle.x = width / 2 + point.x * scale;
@@ -637,7 +638,9 @@ function frame(time) {
   drawNetwork();
   drawConnections();
   const motionEnabled = CONFIG.motion !== "Off";
-  if (CONFIG.generator !== "Source Shape" || CONFIG.emitter !== "SVG" || CONFIG.svgPoints.length > 0) {
+  if (CONFIG.generator !== "Source Shape" ||
+      (CONFIG.emitter !== "SVG" || CONFIG.svgPoints.length > 0) &&
+      (CONFIG.emitter !== "Designer" || CONFIG.svgPoints.length > 0)) {
     for (let index = particles.length - 1; index >= 0; index--) {
       const particle = particles[index];
       if (morphing) {

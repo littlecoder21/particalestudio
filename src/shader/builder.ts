@@ -460,7 +460,7 @@ export interface ShaderFlags {
 export function flagsOf(p: ShaderProject): ShaderFlags {
   const touch = touchFlags(activeRules(p));
   const m = p.mask;
-  const mask = m.enabled;
+  const mask = p.geometryMode || m.enabled;
   return {
     ripples: p.ripples,
     sym: p.symmetry >= 2,
@@ -493,8 +493,8 @@ export function programKey(p: ShaderProject): string {
     f.ripples, f.sym, f.pix, f.warp, f.swirl, f.relief, f.aber, f.scan, f.poster, f.glow, f.tone, f.hue,
     f.mask, f.maskSmoke, f.maskParticles, f.maskWarp, f.maskBevel, f.maskHue,
   ].map((b) => (b ? "1" : "0")).join("");
-  const stack = stackSignature(stackOrder(p.layers), f.mask);
-  return `${p.generator}|${touchSignature(activeRules(p))}|${stack}|${f.maskPattern}|${bits}`;
+  const stack = stackSignature(stackOrder(p.layers), f.mask, p.geometryMode);
+  return `${p.generator}|${p.geometryMode ? "geometry" : "procedural"}|${touchSignature(activeRules(p))}|${stack}|${f.maskPattern}|${bits}`;
 }
 
 function fieldSource(id: GeneratorId): string {
@@ -512,7 +512,7 @@ export function buildFragmentSource(p: ShaderProject): string {
   const f = flagsOf(p);
   const rules = activeRules(p);
   const layers = stackOrder(p.layers);
-  const stack = buildStackGlsl(layers, p.generator, f.mask);
+  const stack = buildStackGlsl(layers, p.generator, f.mask, p.geometryMode);
 
   const defs: string[] = [`#define MPAT ${f.maskPattern}`];
   if (f.ripples) defs.push("#define RIPPLES");

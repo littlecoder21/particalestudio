@@ -31,6 +31,7 @@ import {
   type TouchRule,
   type TouchSettings,
 } from "./types";
+import { validateGeometryDocument } from "../geometry/model";
 
 export const HEX_COLOR = /^#[\da-f]{6}$/i;
 
@@ -73,6 +74,7 @@ const DEFAULT_PALETTE = ["#070a1c", "#26308f", "#4aa8ff", "#e6f4ff"];
 
 export const DEFAULT_PROJECT: ShaderProject = {
   name: "Untitled shader",
+  geometryMode: false,
   generator: "fluid",
   knobs: defaultKnobs("fluid"),
 
@@ -178,6 +180,13 @@ function normalizeTouch(value: unknown, interaction: InteractionMode, base: Shad
 function normalizeMaskSource(value: unknown, base: MaskSource): MaskSource {
   if (!value || typeof value !== "object") return { ...base };
   const s = value as Record<string, unknown>;
+  if (s.kind === "designer") {
+    try {
+      return { kind: "designer", document: validateGeometryDocument(s.document) };
+    } catch {
+      return { ...base };
+    }
+  }
   if (s.kind === "image" && typeof s.data === "string" && s.data.startsWith("data:image/") && s.data.length < 3_000_000) {
     return { kind: "image", name: typeof s.name === "string" ? s.name.slice(0, 40) : "Image", data: s.data };
   }
@@ -271,6 +280,8 @@ export function normalizeProject(input: unknown, base: ShaderProject = DEFAULT_P
   if (!input || typeof input !== "object") throw new Error("This is not a shader project.");
   const v = input as Record<string, unknown>;
   const generator = oneOf<GeneratorId>(v.generator, GENERATOR_IDS, base.generator);
+  const geometryMode = bool(v.geometryMode, base.geometryMode);
+  const mask = normalizeMask(v.mask, base.mask);
   const sameGenerator = generator === base.generator;
   const interaction = oneOf<InteractionMode>(v.interaction, INTERACTION_MODES, base.interaction);
   const stops = normalizeStops(v.palette, v.palettePositions, { min: MIN_PALETTE, max: MAX_PALETTE }, base.palette);
@@ -283,6 +294,7 @@ export function normalizeProject(input: unknown, base: ShaderProject = DEFAULT_P
 
   return {
     name: typeof v.name === "string" && v.name.trim() ? v.name.trim().slice(0, 60) : base.name,
+    geometryMode,
     generator,
     knobs: v.knobs === undefined && sameGenerator ? [...base.knobs] : clampKnobs(generator, numbers(v.knobs)),
 
@@ -328,7 +340,7 @@ export function normalizeProject(input: unknown, base: ShaderProject = DEFAULT_P
     idleDrift: bool(v.idleDrift, base.idleDrift),
     touch: normalizeTouch(v.touch, interaction, base.touch),
 
-    mask: normalizeMask(v.mask, base.mask),
+    mask: geometryMode ? { ...mask, enabled: true } : mask,
 
     layers: normalizeStack(layerSource, newBaseLayer()),
     canvas: color(v.canvas, base.canvas),

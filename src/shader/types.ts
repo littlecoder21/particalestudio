@@ -195,6 +195,7 @@ export interface TextMaskSource {
 export type MaskSource =
   | { kind: "shape"; id: MaskShapeId }
   | { kind: "image"; name: string; data: string }
+  | { kind: "designer"; document: GeometryDocument }
   | TextMaskSource;
 
 export const MASK_PATTERNS = ["None", "Stripes", "Dots", "Grid", "Echo", "Checker", "Hatch", "Scan"] as const;
@@ -341,6 +342,8 @@ export type RangeKey = keyof typeof RANGES;
 
 export interface ShaderProject {
   name: string;
+  /** Use the active mask distance field as the base shader content instead of a procedural generator. */
+  geometryMode: boolean;
   /** the base field — one entry of the layer stack points at it */
   generator: GeneratorId;
   knobs: Knobs;
@@ -411,3 +414,4 @@ export interface ShaderPreset {
 
 export const MIN_PALETTE = 2;
 export const MAX_PALETTE = 6;
+import type { GeometryDocument } from "../geometry/model";

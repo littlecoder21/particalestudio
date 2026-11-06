@@ -63,6 +63,7 @@ import {
   type ShaderPreset,
   type ShaderProject,
 } from "./types";
+import type { GeometryDocument } from "../geometry/model";
 
 /* ───────────────────────── constants ───────────────────────── */
 
@@ -264,9 +265,10 @@ function GeneratorPicker({ value, onPick }: { value: GeneratorId; onPick: (id: G
 interface ShaderStudioProps {
   active: boolean;
   modeSwitch: ReactNode;
+  designerRequest: { id: number; document: GeometryDocument } | null;
 }
 
-export default function ShaderStudio({ active, modeSwitch }: ShaderStudioProps) {
+export default function ShaderStudio({ active, modeSwitch, designerRequest }: ShaderStudioProps) {
   const saved = useMemo(() => loadSaved(), []);
   const customPresetStore = useMemo(() => loadCustomPresets(), []);
   const mobile = useMobile();
@@ -290,6 +292,7 @@ export default function ShaderStudio({ active, modeSwitch }: ShaderStudioProps) 
   const [recording, setRecording] = useState(false);
   const [maskPixels, setMaskPixels] = useState<MaskPixels | null>(null);
   const [maskBusy, setMaskBusy] = useState(false);
+  const appliedDesignerRequestRef = useRef<number | null>(null);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -496,9 +499,33 @@ export default function ShaderStudio({ active, modeSwitch }: ShaderStudioProps) 
   }, []);
 
   const updateMask = useCallback((patch: Partial<ShaderMask>) => {
-    setProject((current) => ({ ...current, mask: { ...current.mask, ...patch } }));
+    setProject((current) => ({
+      ...current,
+      geometryMode: patch.enabled === false ? false : current.geometryMode,
+      mask: { ...current.mask, ...patch },
+    }));
     setIsSaved(false);
   }, []);
+
+  useEffect(() => {
+    if (!active || !designerRequest || appliedDesignerRequestRef.current === designerRequest.id) return;
+    appliedDesignerRequestRef.current = designerRequest.id;
+    setProject(normalizeProject({
+      ...cloneProject(DEFAULT_PROJECT),
+      name: `${designerRequest.document.name} shader`,
+      geometryMode: true,
+      mask: {
+        ...DEFAULT_PROJECT.mask,
+        enabled: true,
+        source: { kind: "designer", document: designerRequest.document },
+      },
+    }));
+    setSelectedLayer("base");
+    setSection("mask");
+    setActivePreset("");
+    setIsSaved(false);
+    setToast("Created a fresh shader from your geometry");
+  }, [active, designerRequest]);
 
   const addMaskField = useCallback(
     (region: "Inside" | "Outside", generator: GeneratorId) => {
@@ -674,15 +701,27 @@ export default function ShaderStudio({ active, modeSwitch }: ShaderStudioProps) 
     return SHADER_PRESETS.filter(matchesPreset);
   }, [query]);
 
-  const sectionMeta = SECTIONS.find((s) => s.id === section) ?? SECTIONS[0];
+  const sectionMeta =
+    section === "mask" && project.geometryMode
+      ? {
+          title: "Geometry shader field",
+          description: "Your designed shape is the shader’s base content. Add layers, colour, motion, lighting and effects around it.",
+        }
+      : section === "field" && project.geometryMode
+        ? {
+            title: "Geometry base field",
+            description: "The procedural base generator is bypassed while your designed geometry drives the shader.",
+          }
+        : SECTIONS.find((s) => s.id === section) ?? SECTIONS[0];
   const canvasW = canvasRef.current?.width ?? 0;
   const canvasH = canvasRef.current?.height ?? 0;
   const layerCount = project.layers.length;
-  const generatorLabel = `${generator.name}${layerCount > 1 ? ` + ${layerCount - 1} layer${layerCount > 2 ? "s" : ""}` : ""}${project.mask.enabled ? " · mask" : ""}`;
+  const generatorLabel = `${project.geometryMode ? "Geometry field" : generator.name}${layerCount > 1 ? ` + ${layerCount - 1} layer${layerCount > 2 ? "s" : ""}` : ""}${project.mask.enabled ? (project.geometryMode ? " · source" : " · mask") : ""}`;
 
   const hintFor = (id: SectionId): string => {
     if (id === "stack") return `${layerCount} layer${layerCount === 1 ? "" : "s"}`;
-    if (id === "mask") return project.mask.enabled ? "On" : "Image mask";
+    if (id === "mask") return project.geometryMode ? "Geometry field" : project.mask.enabled ? "On" : "Image mask";
+    if (id === "field" && project.geometryMode) return "Geometry";
     if (id === "text") return project.mask.source.kind === "text" ? `${project.mask.source.text.length} chars` : "Typography";
     return SECTIONS.find((s) => s.id === id)?.hint ?? "";
   };
@@ -758,6 +797,19 @@ export default function ShaderStudio({ active, modeSwitch }: ShaderStudioProps) 
         );
 
       case "field":
+        if (project.geometryMode) {
+          return (
+            <>
+              <p className="field-help">Your designed shape is the base field; the procedural generator is intentionally not used. Add generators as layers to combine them with the shape, or switch off “Geometry as shader field” in Shape to return to a procedural base.</p>
+              <button type="button" className="svg-upload-button" onClick={() => setSection("stack")}>
+                Add generator or effect layers →
+              </button>
+              <button type="button" className="text-action" onClick={() => setSection("mask")}>
+                Edit geometry source
+              </button>
+            </>
+          );
+        }
         return (
           <>
             <GeneratorPicker

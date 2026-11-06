@@ -404,7 +404,7 @@ const PATTERN_GLSL: Record<PatternId, string> = {
     "vec2 g = abs(fract(pq) - .5); v = (1. - smoothstep(K.y * .25 - sft * .25, K.y * .25 + sft * .25 + 1e-3, min(g.x, g.y))) * (1. - smoothstep(.3, .34, max(g.x, g.y)));",
 };
 
-function kindCode(layer: ShaderLayer, j: number, generator: GeneratorId): string {
+function kindCode(layer: ShaderLayer, j: number, generator: GeneratorId, geometryMode: boolean): string {
   const K = `uLK[${j}]`;
   const rev = `uLF[${j}].y`;
   const fade = `uLF[${j}].x`;
@@ -412,6 +412,13 @@ function kindCode(layer: ShaderLayer, j: number, generator: GeneratorId): string
   const fill = `uLF[${j}].w`;
   switch (layer.kind) {
     case "base":
+      if (geometryMode) {
+        return `
+    float depth = clamp(mk.z, 0., 1.);
+    float bands = .5 + .5 * cos(depth * 30. - lt * 1.2);
+    float fv = clamp(depth * .8 + bands * .2, 0., 1.);
+    r = vec4(ramp(fv), shape); lh = depth; lhole = 0.;`;
+      }
       return `
     gHas = 0.;
     vec4 f = ${fieldFnName(generator)}(q, lt, uK);
@@ -513,14 +520,14 @@ export interface StackGlsl {
  * It expects `p`, `uv`, `t` and — when a mask is present — `cov` to exist, and it
  * declares and fills `cb`, `ab`, `h` and `hole`.
  */
-export function buildStackGlsl(layers: ShaderLayer[], baseGenerator: GeneratorId, hasMask: boolean): StackGlsl {
+export function buildStackGlsl(layers: ShaderLayer[], baseGenerator: GeneratorId, hasMask: boolean, geometryMode = false): StackGlsl {
   const generators = new Set<GeneratorId>();
   const modes = new Set<BlendMode>();
   const blocks: string[] = [];
 
   layers.forEach((layer, j) => {
     const def = KIND_DEFS[layer.kind];
-    if (layer.kind === "base") generators.add(baseGenerator);
+    if (layer.kind === "base" && !geometryMode) generators.add(baseGenerator);
     if (layer.kind === "field") generators.add(layer.generator);
     modes.add(layer.blend);
 
@@ -545,7 +552,7 @@ export function buildStackGlsl(layers: ShaderLayer[], baseGenerator: GeneratorId
     ${palette}
     ${coords}
     vec4 r = vec4(0.); float lh = 0.; float lhole = 0.;
-    ${kindCode(layer, j, baseGenerator)}
+    ${kindCode(layer, j, baseGenerator, geometryMode)}
     float al = clamp(r.a, 0., 1.) * uLA[${j}].x${region};
     ${compose}
     ${height}
@@ -566,7 +573,7 @@ void palProject(float shift){
 `;
 
 /** Everything about the stack that changes the GLSL (as opposed to plain uniform values). */
-export function stackSignature(layers: ShaderLayer[], hasMask: boolean): string {
+export function stackSignature(layers: ShaderLayer[], hasMask: boolean, geometryMode = false): string {
   return layers
     .map((l) =>
       [
@@ -575,6 +582,7 @@ export function stackSignature(layers: ShaderLayer[], hasMask: boolean): string 
         l.kind === "pattern" ? l.pattern : "",
         BLEND_MODES.indexOf(l.blend),
         l.kind === "base" ? "" : l.space === "Scene" ? "s" : "f",
+        l.kind === "base" && geometryMode ? "g" : "",
         hasMask ? l.region[0] : "",
         usesOwnColors(l) ? "o" : "p",
       ].join("."),

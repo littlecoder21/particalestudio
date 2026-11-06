@@ -219,7 +219,7 @@ export default function ExportSheet({
         return (
           <div className="export-pane">
             <p className="field-help">
-              Runs anywhere WebGL2 does. The shader, every setting{project.mask.enabled ? ` and the ${project.mask.source.kind === "text" ? "text" : "image"} mask` : ""} are embedded.
+              Runs anywhere WebGL2 does. The shader, every setting{project.mask.enabled ? ` and the ${project.mask.source.kind === "text" ? "text" : project.mask.source.kind === "designer" ? "designed geometry" : "image"} mask` : ""} are embedded.
             </p>
             <label className="svg-select-control">
               Format

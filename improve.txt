@@ -1,0 +1,576 @@
+# MASTER DEVELOPMENT PROMPT — Particle Studio Shape & Pattern Designer
+
+## Project Context
+
+You are working on my existing Particle Studio repository:
+
+`littlecoder21/particalestudio`
+
+Particle Studio already has:
+- Canvas-based particle rendering.
+- Procedural particle generators.
+- SVG import and path sampling.
+- Multiple SVG sources and morph sequences.
+- Procedural WebGL2 shader generator.
+- Shader masks and built-in shape definitions.
+- Shader layers, effects and interactions.
+- Particle and shader export systems.
+
+I want to add a powerful, professional **Shape & Pattern Designer** as a new dedicated workspace.
+
+This is NOT a simple shape picker, SVG uploader, or preset gallery.
+
+I want users to CREATE their own shapes, patterns, geometry and mathematical formations visually, without manually writing SVG paths or JavaScript.
+
+The result should be a versatile geometry creation environment that integrates with both the existing Particle Engine and Shader Engine.
+
+---
+
+# PHASE 1 — INSPECT THE EXISTING ARCHITECTURE
+
+Before coding:
+
+1. Inspect the complete repository structure.
+2. Understand the current particle source and shape generation system.
+3. Inspect SVG import, parsing, path sampling and morphing.
+4. Inspect the shader mask and geometry systems.
+5. Identify existing reusable geometry utilities.
+6. Understand how the UI workspaces and navigation are structured.
+7. Identify how generated geometry currently reaches the particle renderer and shader renderer.
+
+Do not start by creating a separate disconnected implementation.
+
+Prepare an architecture report identifying:
+- Existing reusable modules.
+- Missing functionality.
+- Files that need modification.
+- New modules that should be created.
+- Integration points.
+
+Preserve the existing architecture wherever possible.
+
+# PHASE 2 — BUILD A PROFESSIONAL VECTOR SHAPE EDITOR
+
+Create a dedicated visual vector editor.
+
+## Drawing tools
+
+Implement:
+
+- Selection tool.
+- Pen tool.
+- Freehand drawing.
+- Polygon tool.
+- Rectangle tool.
+- Rounded rectangle tool.
+- Ellipse and circle tool.
+- Line tool.
+- Polyline tool.
+- Star tool.
+- Spiral tool.
+- Custom path tool.
+
+## Advanced path editing
+
+The editor must support:
+
+- Add and delete anchor points.
+- Move individual nodes.
+- Convert points between corner and smooth nodes.
+- Bézier handles.
+- Independent handle adjustment.
+- Symmetrical handles.
+- Curve continuity.
+- Close and open paths.
+- Multiple paths.
+- Path duplication.
+- Path grouping.
+- Path ordering.
+- Undo and redo.
+- Copy and paste.
+- Zoom and pan.
+- Snap to grid.
+- Alignment guides.
+- Numeric coordinate editing.
+
+## Advanced geometry operations
+
+Implement:
+
+- Union.
+- Subtract.
+- Intersect.
+- Exclude.
+- Offset path.
+- Expand and contract.
+- Simplify path.
+- Round corners.
+- Stroke to outline.
+- Combine and separate paths.
+
+Preserve holes and disconnected contours correctly.
+
+Do not simulate Boolean operations using visual approximations. Use a reliable geometry algorithm or a suitable library if necessary.
+
+# PHASE 3 — MATHEMATICAL SHAPE GENERATOR
+
+Create a dedicated mathematical geometry engine.
+
+Users should be able to generate and edit shapes through mathematical parameters.
+
+Include:
+
+### Parametric curves
+- Rose curves.
+- Lissajous curves.
+- Hypotrochoids.
+- Epitrochoids.
+- Spirographs.
+- Cycloids.
+- Epicycloids.
+- Hypocycloids.
+- Superformula curves.
+- Polar curves.
+- Custom parametric equations.
+
+### Mathematical geometry
+- Superellipse.
+- Rounded polygons.
+- Regular and irregular polygons.
+- Star polygons.
+- Gear shapes.
+- Concentric circles.
+- Spiral geometry.
+- Logarithmic spirals.
+- Fibonacci spirals.
+- Wave geometry.
+
+### Fractal geometry
+- Koch snowflake.
+- Sierpinski triangle.
+- Sierpinski carpet.
+- Dragon curve.
+- Hilbert curve.
+- Recursive branching.
+- Fractal trees.
+- Custom recursive geometry.
+
+### SDF-based geometry
+- Circle.
+- Box.
+- Rounded box.
+- Capsule.
+- Triangle.
+- Polygon.
+- Star.
+- Ring.
+- Arc.
+- Custom combinations.
+
+Every mathematical generator should expose meaningful controls.
+
+For example, a Rose Curve should support:
+- Petal count.
+- Radius.
+- Rotation.
+- Inner radius.
+- Complexity.
+- Sampling resolution.
+- Distortion.
+
+Do not create fake controls. Each parameter must actually change the geometry.
+
+# PHASE 4 — ADVANCED PATTERN DESIGNER
+
+Create a separate Pattern Designer within the workspace.
+
+The user must be able to create complex patterns from simple geometry.
+
+## Pattern systems
+
+Implement:
+
+- Radial repetition.
+- Linear repetition.
+- Grid repetition.
+- Circular repetition.
+- Spiral repetition.
+- Mirror symmetry.
+- Rotational symmetry.
+- Kaleidoscope.
+- Voronoi patterns.
+- Cellular patterns.
+- Organic patterns.
+- Geometric tiling.
+- Wave interference.
+- Moiré patterns.
+- Nested shapes.
+- Recursive patterns.
+
+## Pattern controls
+
+Expose:
+
+- Count.
+- Spacing.
+- Rotation.
+- Scale.
+- Offset.
+- Randomness.
+- Seed.
+- Symmetry.
+- Distribution.
+- Density.
+- Inner and outer radius.
+- Row and column counts.
+- Pattern distortion.
+- Animation phase.
+
+Support multiple pattern layers.
+
+Allow one pattern to use another shape or pattern as its source.
+
+# PHASE 5 — SHAPE DISTRIBUTION ENGINE
+
+This is critical because Particle Studio needs geometry that can be consumed by its particle system.
+
+Create a unified sampling engine.
+
+Supported sampling modes:
+
+1. Outline sampling.
+2. Filled-area sampling.
+3. Uniform distribution.
+4. Random distribution.
+5. Weighted distribution.
+6. Density distribution.
+7. Grid distribution.
+8. Poisson-disc distribution.
+9. Adaptive curve sampling.
+10. Interior and exterior sampling.
+
+Advanced settings:
+
+- Point count.
+- Point spacing.
+- Density.
+- Random seed.
+- Edge weighting.
+- Center weighting.
+- Distribution falloff.
+- Sampling resolution.
+- Minimum distance.
+- Maximum distance.
+- Shape bounds.
+- Aspect ratio preservation.
+
+Ensure that holes, disconnected paths and complex contours are respected.
+
+Avoid uneven particle spacing on curves.
+
+# PHASE 6 — ORGANIC AND PROCEDURAL SHAPES
+
+Add tools for creating less geometric, more organic forms.
+
+Include:
+
+- Organic blobs.
+- Metaball-like shapes.
+- Flowing contours.
+- Noise-distorted outlines.
+- Cellular forms.
+- Fluid-like silhouettes.
+- Fractal contours.
+- Branching structures.
+- Voronoi cells.
+- Randomized organic polygons.
+
+Expose controls for:
+- Noise type.
+- Noise scale.
+- Distortion strength.
+- Smoothness.
+- Complexity.
+- Seed.
+- Animation.
+- Number of iterations.
+
+Where possible, use deterministic seeded randomness so the same settings reproduce the same geometry.
+
+# PHASE 7 — LIVE EDITING AND PREVIEW
+
+The workspace needs a large interactive design canvas.
+
+Required behavior:
+
+- Live geometry preview.
+- Real-time node editing.
+- Drag handles.
+- Zoom and pan.
+- Fit to canvas.
+- Grid and rulers.
+- Selection highlighting.
+- Multiple selected objects.
+- Multi-layer geometry.
+- Live pattern updates.
+- Responsive interaction.
+- Mobile-friendly touch controls.
+
+Editing a shape must update the preview immediately.
+
+Avoid rebuilding expensive geometry on every pointer movement when it can be updated incrementally.
+
+Use efficient geometry caching and controlled recalculation.
+
+# PHASE 8 — UNIFIED GEOMETRY DATA MODEL
+
+This is one of the most important architectural requirements.
+
+Create a shared geometry representation that can be consumed by multiple systems.
+
+Conceptually, it should support:
+
+- Vector paths.
+- Bézier curves.
+- Polygons.
+- Multiple contours.
+- Holes.
+- Transformations.
+- Pattern instances.
+- Mathematical generator parameters.
+- Sampling settings.
+- Bounds.
+- Optional animation parameters.
+
+The exact TypeScript structure must be designed after inspecting the existing repository.
+
+The unified geometry must support these operations:
+
+1. Render as editable vector geometry.
+2. Export as SVG.
+3. Convert to particle positions.
+4. Convert to shader mask data.
+5. Animate between compatible shapes.
+6. Use as an input to procedural shader generators.
+7. Reuse geometry in pattern systems.
+
+Do not create incompatible geometry formats for every editor.
+
+Do not unnecessarily replace existing SVG source types. Build adapters or migrations where appropriate.
+
+# PHASE 9 — PARTICLE STUDIO INTEGRATION
+
+Add a new source option to the existing particle creation workflow:
+
+**Custom Designer Shape**
+
+Users should be able to:
+
+- Open Shape Designer.
+- Create a shape.
+- Save it.
+- Return to the particle workspace.
+- Use it as the particle source.
+- Change particle distribution.
+- Animate particles into the shape.
+- Morph between multiple designed shapes.
+
+Keep existing SVG import and morph functionality working.
+
+Support both manually created and mathematically generated geometry.
+
+# PHASE 10 — SHADER STUDIO INTEGRATION
+
+Integrate the geometry system with the existing shader workspace.
+
+Allow designed geometry to become:
+
+- Shader masks.
+- SDF shapes.
+- Repeating shader patterns.
+- Geometry-based displacement masks.
+- Procedural pattern inputs.
+- Layer masks.
+- Animated shape boundaries.
+
+The geometry should be usable by the shader renderer without unnecessary CPU-side conversion every frame.
+
+Choose appropriate representations for each operation, such as vector paths, raster masks, signed-distance fields or GPU textures.
+
+Do not force all geometry into one representation if that would damage performance or quality.
+
+# PHASE 11 — SHAPE LIBRARY AND PRESETS
+
+Create a library for user-created geometry.
+
+Features:
+
+- Save custom shapes.
+- Save patterns.
+- Save mathematical configurations.
+- Rename.
+- Duplicate.
+- Delete.
+- Organize into categories.
+- Search.
+- Preview thumbnails.
+- Import and export JSON.
+- Export SVG.
+- Reopen and edit previously saved designs.
+
+Include starter examples, but never make presets the only way to create geometry.
+
+# PHASE 12 — ANIMATION AND MORPHING
+
+Support geometry animation where practical.
+
+Include:
+
+- Point movement.
+- Curve deformation.
+- Shape scaling and rotation.
+- Pattern count animation.
+- Pattern rotation.
+- Noise deformation.
+- Morph between compatible shapes.
+- Animated mathematical parameters.
+- Timeline and keyframes.
+
+Preserve topology where necessary for reliable morphing.
+
+When two shapes have incompatible geometry, provide a sensible resampling or correspondence strategy rather than assuming their point indices match.
+
+# PHASE 13 — EXPORT
+
+Support:
+
+- SVG export.
+- JSON project export.
+- Particle position data.
+- Geometry data.
+- PNG preview.
+- Shader mask texture.
+- Reusable geometry presets.
+
+Keep export formats compatible with the existing Particle Studio export architecture.
+
+# PHASE 14 — PERFORMANCE AND RELIABILITY
+
+The editor must remain responsive with complex geometry.
+
+Requirements:
+
+- Efficient path rendering.
+- Geometry caching.
+- Debounced expensive operations.
+- Incremental updates.
+- Adaptive sampling.
+- Avoid unnecessary React rerenders.
+- Web Workers for expensive geometry calculations where useful.
+- Memory cleanup.
+- Undo history limits.
+- Large-path protection.
+- Mobile performance.
+
+Never sacrifice editing accuracy simply to improve preview performance.
+
+# PHASE 15 — UI / UX DESIGN
+
+Build a professional design environment inspired by the best parts of Figma, Illustrator and procedural geometry tools.
+
+Suggested layout:
+
+**Left sidebar**
+- Tools.
+- Layers.
+- Objects.
+- Shape library.
+
+**Center**
+- Large design canvas.
+- Grid.
+- Selection controls.
+- Node handles.
+- Live preview.
+
+**Right sidebar**
+- Geometry properties.
+- Curve controls.
+- Mathematical parameters.
+- Pattern controls.
+- Distribution settings.
+
+**Top toolbar**
+- Workspace tabs.
+- Undo/redo.
+- Zoom.
+- Save.
+- Import/export.
+- Preview mode.
+
+Keep Shape Designer as its own workspace. Do not overload the existing particle or shader panels.
+
+Make it responsive for desktop and touch devices.
+
+---
+
+# NON-NEGOTIABLE DEVELOPMENT RULES
+
+1. Inspect before implementing.
+2. Do not rewrite the entire application.
+3. Do not remove or break existing functionality.
+4. Preserve all existing particle generators and presets.
+5. Preserve the current shader engine and its presets.
+6. Preserve SVG import and morph sequences.
+7. Reuse existing utilities wherever practical.
+8. Avoid unnecessary dependencies.
+9. Do not implement fake or decorative controls.
+10. Every visible control must work.
+11. Use TypeScript types properly.
+12. Keep geometry logic separate from UI components.
+13. Keep the new editor modular.
+14. Preserve backward compatibility with existing projects.
+15. Do not make unrelated changes.
+
+# IMPLEMENTATION WORKFLOW
+
+Do not attempt to implement all phases in one massive change.
+
+Work in stages:
+
+**Stage 1:** Repository inspection and architecture proposal.
+
+**Stage 2:** Unified geometry data model and vector editor foundation.
+
+**Stage 3:** Pen tool, node editing and Bézier handles.
+
+**Stage 4:** Mathematical shape generator.
+
+**Stage 5:** Pattern designer.
+
+**Stage 6:** Distribution and sampling engine.
+
+**Stage 7:** Particle Studio integration.
+
+**Stage 8:** Shader Studio integration.
+
+**Stage 9:** Shape library and export.
+
+**Stage 10:** Animation, optimization and testing.
+
+At the end of each stage:
+
+- List the exact files created and modified.
+- Explain the implementation.
+- Run TypeScript checks and relevant tests.
+- Test existing functionality for regressions.
+- Report unfinished functionality honestly.
+- Wait for approval before proceeding to the next major stage.
+
+# FINAL PRODUCT VISION
+
+I want Particle Studio to have a real geometry creation environment.
+
+I should be able to open the editor and manually draw a complicated butterfly, create a spiral galaxy using mathematical equations, design a complex radial pattern, generate organic shapes, edit every Bézier point, and turn any of these designs into particles or shader geometry.
+
+**The key objective is creative freedom: users must be able to construct shapes and patterns themselves, not merely choose from a collection of predefined shapes.**
