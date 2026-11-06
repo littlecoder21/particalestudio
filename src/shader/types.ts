@@ -15,10 +15,18 @@ export const GENERATOR_IDS = [
   "linearGradient", "radialGradient", "conicGradient", "diamondGradient", "spiralGradient",
   "reflectedGradient", "sunsetGradient", "iridescentGradient", "holographicGradient",
   "liquidGradient", "noiseGradient", "topographicGradient", "prismaticGradient",
+  /* noise, vector-field, distance-field, maths and organic families (see generatorsExtra.ts) */
+  "valueNoise", "simplexNoise", "ridgedNoise", "cellular",
+  "curlFlow", "flowLines", "vortexField", "fluidDye",
+  "sdfShapes", "sdfBlend",
+  "polarRose", "spiralArms", "lissajous", "moire", "mandelbrot", "kaliIfs",
+  "turing", "membrane", "veins", "cellGrowth",
 ] as const;
 export type GeneratorId = (typeof GENERATOR_IDS)[number];
 
-export const GENERATOR_CATEGORIES = ["Fluid", "Cosmic", "Light", "Pattern", "Gradient"] as const;
+export const GENERATOR_CATEGORIES = [
+  "Fluid", "Cosmic", "Light", "Pattern", "Gradient", "Noise", "Vector", "Geometry", "Math", "Organic",
+] as const;
 export type GeneratorCategory = (typeof GENERATOR_CATEGORIES)[number];
 
 /* ───────────────────────── pointer ───────────────────────── */

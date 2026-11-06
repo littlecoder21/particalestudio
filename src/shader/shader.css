@@ -135,6 +135,58 @@
 
 .shader-studio .preset-search input[type="search"] { appearance: none; }
 .shader-studio .preset-grid + .svg-upload-button { margin-top: 14px; }
+.custom-preset-save {
+  margin-bottom: 12px;
+  padding: 11px;
+  border: 1px solid rgba(190, 163, 255, .18);
+  border-radius: 10px;
+  background: rgba(169, 139, 255, .055);
+}
+.custom-preset-save .field-help { margin: 0 0 9px; }
+.custom-preset-name {
+  display: grid;
+  gap: 5px;
+  margin-bottom: 9px;
+  color: #aeb3c1;
+  font-size: 10px;
+  font-weight: 600;
+}
+.custom-preset-name input {
+  width: 100%;
+  height: 34px;
+  padding: 0 9px;
+  color: #e2deed;
+  background: #171a25;
+  border: 1px solid var(--ps-line);
+  border-radius: 8px;
+  font: inherit;
+}
+.custom-preset-name input:focus-visible { outline: 1px solid #c09dff; }
+.custom-preset-save .svg-upload-button { width: 100%; margin-top: 0; }
+.preset-shelf-heading {
+  margin: 15px 0 8px;
+  color: #b7bac8;
+  font: 700 10px Manrope, sans-serif;
+}
+.custom-preset-card { position: relative; min-width: 0; }
+.custom-preset-card .preset-card { display: block; width: 100%; height: 100%; }
+.custom-preset-delete {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  display: grid;
+  width: 21px;
+  height: 21px;
+  padding: 0;
+  place-items: center;
+  color: #f0d7e2;
+  background: rgba(20, 16, 25, .86);
+  border: 1px solid rgba(255, 255, 255, .2);
+  border-radius: 50%;
+  font: 14px/1 Manrope, sans-serif;
+  cursor: pointer;
+}
+.custom-preset-delete:hover { color: #fff; background: #8c3657; }
 
 .shader-studio .generator-grid { margin-bottom: 4px; }
 .shader-studio .field-help { margin-top: 10px; }

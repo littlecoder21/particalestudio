@@ -1,4 +1,5 @@
 import { GENERATOR_MAP } from "./generators";
+import { glslModules, type GlslModuleId } from "./glslLib";
 import { SDF_SPAN } from "./mask";
 import {
   STACK_GLSL_HELPERS,
@@ -500,6 +501,13 @@ function fieldSource(id: GeneratorId): string {
   return GENERATOR_MAP[id].glsl.split("FIELD").join(fieldFnName(id));
 }
 
+/** Library modules (noise, distance fields, vector fields) the stack's generators call. */
+function libraryFor(generators: readonly GeneratorId[]): string {
+  const ids = new Set<GlslModuleId>();
+  for (const id of generators) for (const module of GENERATOR_MAP[id].uses ?? []) ids.add(module);
+  return glslModules(ids);
+}
+
 export function buildFragmentSource(p: ShaderProject): string {
   const f = flagsOf(p);
   const rules = activeRules(p);
@@ -538,6 +546,7 @@ export function buildFragmentSource(p: ShaderProject): string {
     f.mask ? MASK_GLSL : "",
     buildTouchGlsl(rules),
     PIPELINE,
+    libraryFor(stack.generators),
     ...stack.generators.map(fieldSource),
     buildScene(stack.code, f.mask),
     FINISH,

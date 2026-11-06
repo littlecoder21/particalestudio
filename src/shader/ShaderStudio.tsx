@@ -21,6 +21,7 @@ import {
 } from "./controls";
 import ExportSheet from "./ExportSheet";
 import { GENERATORS, GENERATOR_MAP, defaultKnobs } from "./generators";
+import GeneratorKnobs from "./GeneratorKnobs";
 import GradientBar from "./GradientBar";
 import {
   IconChevronDown,
@@ -81,9 +82,13 @@ const SECTIONS: Array<{ id: SectionId; icon: string; label: string; hint: string
   { id: "touch", icon: "⌖", label: "Touch", hint: "25 modes", title: "Pointer & touch", description: "Pick one of 25 pointer modes or build your own." },
 ];
 
-const CATEGORY_ICON: Record<GeneratorCategory, string> = { Fluid: "≈", Cosmic: "✺", Light: "☀", Pattern: "▦", Gradient: "◈" };
+const CATEGORY_ICON: Record<GeneratorCategory, string> = {
+  Fluid: "≈", Cosmic: "✺", Light: "☀", Pattern: "▦", Gradient: "◈",
+  Noise: "∿", Vector: "↯", Geometry: "△", Math: "∑", Organic: "❦",
+};
 
 const STORAGE_KEY = "particle-studio-shader-project";
+const CUSTOM_PRESETS_KEY = "particle-studio-custom-shader-presets";
 
 /* Mobile split view: the control dock takes a share of the workspace, the preview gets the rest. */
 const DOCK_KEY = "particle-studio-shader-dock";
@@ -137,6 +142,36 @@ function loadSaved(): SavedShader | null {
   }
 }
 
+interface CustomPresetStore {
+  presets: ShaderPreset[];
+  error: string | null;
+}
+
+function loadCustomPresets(): CustomPresetStore {
+  try {
+    const raw = localStorage.getItem(CUSTOM_PRESETS_KEY);
+    if (!raw) return { presets: [], error: null };
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) throw new Error("The saved presets are not a list.");
+    const presets = parsed.map((value): ShaderPreset => {
+      if (!value || typeof value !== "object") throw new Error("A saved preset is invalid.");
+      const preset = value as Record<string, unknown>;
+      if (typeof preset.name !== "string" || !preset.name.trim()) throw new Error("A saved preset has no name.");
+      const name = preset.name.trim().slice(0, 60);
+      const project = normalizeProject(preset.project);
+      return {
+        name,
+        tag: typeof preset.tag === "string" ? preset.tag.slice(0, 80) : "My shader",
+        project: normalizeProject({ ...project, name }),
+      };
+    });
+    return { presets, error: null };
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : "Unknown storage error";
+    return { presets: [], error: `Couldn't load your saved presets: ${detail}` };
+  }
+}
+
 interface DockDrag {
   id: number;
   startY: number;
@@ -169,6 +204,33 @@ function PresetCard({ preset, active, onPick }: { preset: ShaderPreset; active: 
   );
 }
 
+function CustomPresetCard({
+  preset,
+  active,
+  onPick,
+  onDelete,
+}: {
+  preset: ShaderPreset;
+  active: boolean;
+  onPick: () => void;
+  onDelete: () => void;
+}) {
+  return (
+    <div className="custom-preset-card">
+      <PresetCard preset={preset} active={active} onPick={onPick} />
+      <button
+        type="button"
+        className="custom-preset-delete"
+        aria-label={`Delete ${preset.name} preset`}
+        title={`Delete ${preset.name}`}
+        onClick={onDelete}
+      >
+        ×
+      </button>
+    </div>
+  );
+}
+
 function GeneratorPicker({ value, onPick }: { value: GeneratorId; onPick: (id: GeneratorId) => void }) {
   const [category, setCategory] = useState<"All" | GeneratorCategory>("All");
   const list = GENERATORS.filter((g) => category === "All" || g.category === category);
@@ -197,25 +259,6 @@ function GeneratorPicker({ value, onPick }: { value: GeneratorId; onPick: (id: G
   );
 }
 
-function KnobSliders({ id, knobs, onChange }: { id: GeneratorId; knobs: Knobs; onChange: (index: 0 | 1 | 2 | 3, value: number) => void }) {
-  return (
-    <>
-      {GENERATOR_MAP[id].knobs.map((def, i) => (
-        <RangeControl
-          key={def.label}
-          label={def.label}
-          min={def.min}
-          max={def.max}
-          step={def.step}
-          value={knobs[i] ?? def.value}
-          reset={def.value}
-          onChange={(value) => onChange(i as 0 | 1 | 2 | 3, value)}
-        />
-      ))}
-    </>
-  );
-}
-
 /* ───────────────────────── studio ───────────────────────── */
 
 interface ShaderStudioProps {
@@ -225,6 +268,7 @@ interface ShaderStudioProps {
 
 export default function ShaderStudio({ active, modeSwitch }: ShaderStudioProps) {
   const saved = useMemo(() => loadSaved(), []);
+  const customPresetStore = useMemo(() => loadCustomPresets(), []);
   const mobile = useMobile();
   const [project, setProject] = useState<ShaderProject>(
     () => saved?.project ?? cloneProject(SHADER_PRESETS[0]?.project ?? DEFAULT_PROJECT),
@@ -236,6 +280,7 @@ export default function ShaderStudio({ active, modeSwitch }: ShaderStudioProps) 
   const [dockFrac, setDockFrac] = useState<number>(loadDock);
   const [settle, setSettle] = useState(0);
   const [isSaved, setIsSaved] = useState<boolean>(saved !== null);
+  const [customPresets, setCustomPresets] = useState<ShaderPreset[]>(customPresetStore.presets);
   const [query, setQuery] = useState("");
   const [toast, setToast] = useState<string | null>(null);
   const [stats, setStats] = useState<RendererStats>({ fps: 60, quality: 1 });
@@ -261,11 +306,22 @@ export default function ShaderStudio({ active, modeSwitch }: ShaderStudioProps) 
     toastTimer.current = window.setTimeout(() => setToast(null), 2200);
   }, []);
 
+  useEffect(() => {
+    if (customPresetStore.error) showToast(customPresetStore.error);
+  }, [customPresetStore.error, showToast]);
+
   /* renderer lifecycle */
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const renderer = new ShaderRenderer(canvas, { interactive: true, autoSize: true, onStats: setStats, onError: setError });
+    const renderer = new ShaderRenderer(canvas, {
+      interactive: true,
+      autoSize: true,
+      // wait for the sliders / toggles to settle before recompiling a new GLSL variant
+      compileDelay: 140,
+      onStats: setStats,
+      onError: setError,
+    });
     rendererRef.current = renderer;
     setSupported(renderer.supported);
     renderer.setProject(projectRef.current);
@@ -537,8 +593,59 @@ export default function ShaderStudio({ active, modeSwitch }: ShaderStudioProps) 
     }
   };
 
+  const saveCustomPreset = () => {
+    const name = project.name.trim().slice(0, 60);
+    if (!name) {
+      showToast("Give your shader a name before saving it as a preset");
+      return;
+    }
+    if (SHADER_PRESETS.some((preset) => preset.name.toLowerCase() === name.toLowerCase())) {
+      showToast("That name belongs to a built-in preset — choose another name");
+      return;
+    }
+    const projectSnapshot = normalizeProject({ ...project, name });
+    const preset: ShaderPreset = {
+      name,
+      tag: `${GENERATOR_MAP[project.generator].name} · ${project.layers.length} layers`,
+      project: projectSnapshot,
+    };
+    const existing = customPresets.findIndex((item) => item.name.toLowerCase() === name.toLowerCase());
+    const next = [...customPresets];
+    if (existing < 0) next.unshift(preset);
+    else next[existing] = preset;
+    try {
+      localStorage.setItem(CUSTOM_PRESETS_KEY, JSON.stringify(next));
+      setCustomPresets(next);
+      setProject(projectSnapshot);
+      setActivePreset(name);
+      setIsSaved(true);
+      showToast(existing < 0 ? `Saved ${name} to My presets` : `Updated ${name}`);
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : "Unknown storage error";
+      showToast(`Couldn't save this preset: ${detail}`);
+    }
+  };
+
+  const deleteCustomPreset = (name: string) => {
+    const next = customPresets.filter((preset) => preset.name !== name);
+    try {
+      localStorage.setItem(CUSTOM_PRESETS_KEY, JSON.stringify(next));
+      setCustomPresets(next);
+      if (activePreset === name) {
+        setActivePreset("");
+        setIsSaved(false);
+      }
+      showToast(`Deleted ${name}`);
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : "Unknown storage error";
+      showToast(`Couldn't delete this preset: ${detail}`);
+    }
+  };
+
   const reset = () => {
-    const preset = SHADER_PRESETS.find((p) => p.name === activePreset) ?? SHADER_PRESETS[0];
+    const preset = customPresets.find((p) => p.name === activePreset)
+      ?? SHADER_PRESETS.find((p) => p.name === activePreset)
+      ?? SHADER_PRESETS[0];
     if (preset) {
       applyProject(preset.project, preset.name);
       showToast(`Reset to ${preset.name}`);
@@ -557,9 +664,14 @@ export default function ShaderStudio({ active, modeSwitch }: ShaderStudioProps) 
   /* ───────── derived ───────── */
 
   const generator = GENERATOR_MAP[project.generator];
+  const matchesPreset = (preset: ShaderPreset) =>
+    `${preset.name} ${preset.tag} ${preset.project.generator} ${GENERATOR_MAP[preset.project.generator].name}`.toLowerCase().includes(query.trim().toLowerCase());
+  const filteredCustomPresets = useMemo(
+    () => customPresets.filter(matchesPreset),
+    [customPresets, query],
+  );
   const filteredPresets = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    return q ? SHADER_PRESETS.filter((p) => `${p.name} ${p.tag} ${p.project.generator}`.toLowerCase().includes(q)) : SHADER_PRESETS;
+    return SHADER_PRESETS.filter(matchesPreset);
   }, [query]);
 
   const sectionMeta = SECTIONS.find((s) => s.id === section) ?? SECTIONS[0];
@@ -582,6 +694,22 @@ export default function ShaderStudio({ active, modeSwitch }: ShaderStudioProps) 
       case "presets":
         return (
           <>
+            <div className="custom-preset-save">
+              <p className="field-help">Combine a generator, shape, layers and effects, then save the result here to reuse it.</p>
+              <label className="custom-preset-name">
+                Preset name
+                <input
+                  type="text"
+                  value={project.name}
+                  maxLength={60}
+                  aria-label="Preset name"
+                  onChange={(event) => update("name", event.target.value)}
+                />
+              </label>
+              <button type="button" className="svg-upload-button" onClick={saveCustomPreset}>
+                Save to My presets
+              </button>
+            </div>
             <div className="preset-search">
               <input
                 type="search"
@@ -590,8 +718,25 @@ export default function ShaderStudio({ active, modeSwitch }: ShaderStudioProps) 
                 onChange={(event) => setQuery(event.target.value)}
                 aria-label="Search presets"
               />
-              <small>{filteredPresets.length}</small>
+              <small>{filteredPresets.length + filteredCustomPresets.length}</small>
             </div>
+            {filteredCustomPresets.length > 0 && (
+              <>
+                <h3 className="preset-shelf-heading">My presets</h3>
+                <div className="preset-grid">
+                  {filteredCustomPresets.map((preset) => (
+                    <CustomPresetCard
+                      key={preset.name}
+                      preset={preset}
+                      active={preset.name === activePreset}
+                      onPick={() => applyProject(preset.project, preset.name)}
+                      onDelete={() => deleteCustomPreset(preset.name)}
+                    />
+                  ))}
+                </div>
+              </>
+            )}
+            <h3 className="preset-shelf-heading">Built-in presets</h3>
             <div className="preset-grid">
               {filteredPresets.map((preset) => (
                 <PresetCard
@@ -602,7 +747,7 @@ export default function ShaderStudio({ active, modeSwitch }: ShaderStudioProps) 
                 />
               ))}
             </div>
-            {filteredPresets.length === 0 && <p className="field-help">No preset matches “{query}”.</p>}
+            {filteredPresets.length + filteredCustomPresets.length === 0 && <p className="field-help">No preset matches “{query}”.</p>}
             <button type="button" className="svg-upload-button" onClick={surprise}>
               <span>⚄</span> Surprise me
             </button>
@@ -622,10 +767,13 @@ export default function ShaderStudio({ active, modeSwitch }: ShaderStudioProps) 
               }}
             />
             <div className="control-divider" />
-            <KnobSliders id={project.generator} knobs={project.knobs} onChange={setKnob} />
+            <GeneratorKnobs id={project.generator} knobs={project.knobs} onChange={setKnob} />
             <button type="button" className="text-action" onClick={() => update("knobs", defaultKnobs(project.generator))}>
               Reset knobs
             </button>
+            <SoftTip>
+              Make a look with this field, then add more generators, gradients and effects in <b>Stack</b>. Use <b>Shape</b> to mask it, and save the finished project as a reusable preset.
+            </SoftTip>
           </>
         );
 

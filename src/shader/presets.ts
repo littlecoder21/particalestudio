@@ -93,6 +93,12 @@ export const SHADER_PRESETS: ShaderPreset[] = [
   mk("Mono Lens", "Monochrome gravity", "blackhole", [1.2, 0.8, 0.7, 0.3],
     ["#4d4d4d", "#333842", "#bfc4cc", "#ffffff", "#e6f2ff"], "#e6f2ff",
     { tone: 1, grain: 0.06, vignette: 0.35 }),
+  mk("Black Hole", "Gravitational lens and starfield", "blackhole", [1.15, 0.85, 1.2, 0.55],
+    ["#432522", "#1a4779", "#75c7e8", "#fff1bd", "#ff8f3d"], "#b9edff",
+    {
+      speed: 0.9, glow: 0.42, tone: 0.15, vignette: 0.58, grain: 0.08,
+      overlay: { enabled: true, generator: "stars", blend: "Add", opacity: 0.42 },
+    }),
 
   /* ── Light ── */
   mk("Northern Veil", "Aurora over a starry sky", "aurora", [1, 0.5, 1, 1],

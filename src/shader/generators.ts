@@ -1,3 +1,5 @@
+import { EXTRA_GENERATORS } from "./generatorsExtra";
+import type { GlslModuleId } from "./glslLib";
 import type { GeneratorCategory, GeneratorId, Knobs } from "./types";
 
 /**
@@ -34,6 +36,8 @@ export interface GeneratorDef {
   knobs: [KnobDef, KnobDef, KnobDef, KnobDef];
   /** Optional label for each palette stop when the generator uses colour roles. */
   roles?: string[];
+  /** Shared GLSL modules (glslLib.ts) the code calls. The builder pastes each one once. */
+  uses?: readonly GlslModuleId[];
   glsl: string;
 }
 
@@ -707,6 +711,7 @@ vec4 FIELD(vec2 p, float t, vec4 K){
 }`,
   },
   ...GRADIENT_GENERATORS,
+  ...EXTRA_GENERATORS,
 ];
 
 export const GENERATOR_MAP: Record<GeneratorId, GeneratorDef> =

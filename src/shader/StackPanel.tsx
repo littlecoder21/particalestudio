@@ -1,6 +1,7 @@
 import { useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
 import { ChoiceGroup, ColorField, Fold, RangeControl, SoftTip, ToggleRow } from "./controls";
 import { GENERATORS, GENERATOR_MAP, defaultKnobs } from "./generators";
+import GeneratorKnobs from "./GeneratorKnobs";
 import GradientBar from "./GradientBar";
 import { BLEND_GROUPS, KIND_DEFS, defaultLayerKnobs, layerKnobDefs, layerSummary, newLayer } from "./stack";
 import { cssGradient, evenPositions, toStops } from "./stops";
@@ -212,7 +213,13 @@ function LayerEditor({ layer, maskOn, index, count, onPatch, onMove, onDuplicate
             {layer.kind === "pattern" && (
               <ChoiceGroup label="Pattern" value={layer.pattern} options={PATTERN_IDS} onChange={(pattern: PatternId) => onPatch({ pattern })} />
             )}
-            {knobDefs.map((k, i) => (
+            {layer.kind === "field" ? (
+              <GeneratorKnobs
+                id={layer.generator}
+                knobs={layer.knobs}
+                onChange={setKnob}
+              />
+            ) : knobDefs.map((k, i) => (
               <RangeControl
                 key={`${layer.kind}-${layer.generator}-${k.label}`}
                 label={k.label}
