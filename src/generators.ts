@@ -4,27 +4,31 @@ export const generatorLibrary = [
     generators: [
       "Spiral", "Vortex", "Radial Burst", "Concentric Rings", "Wave Field", "Grid", "Tunnel",
       "Sphere", "Helix", "Fibonacci Distribution", "Fractal Formation",
+      "Particle Sphere", "Particle Torus", "DNA Helix", "Particle Galaxy", "Möbius Structure",
+      "Particle Cube", "Klein Bottle", "Mandelbulb", "Wave Surface", "Particle Flower",
+      "Particle Knot", "Particle Explosion", "Fluid Sculpture",
     ],
   },
   {
     category: "Organic",
     generators: [
       "Dust Cloud", "Smoke", "Mist", "Fluid Flow", "Ink Diffusion", "Fireflies", "Turbulence",
-      "Cellular", "Organic Blobs", "Drifting Particles",
+      "Cellular", "Organic Blobs", "Drifting Particles", "Volumetric Smoke", "Particle Fabric",
+      "Wormhole", "Crystal Formation", "Atomic Structure",
     ],
   },
   {
     category: "Network",
     generators: [
       "Connected Nodes", "Neural Network", "Constellation", "Branching Structures", "Dynamic Web",
-      "Proximity Web",
+      "Proximity Web", "Energy Vortex",
     ],
   },
   {
     category: "Energy",
     generators: [
       "Light Streams", "Electric Arcs", "Energy Field", "Magnetic Formation", "Particle Beam",
-      "Shockwave", "Explosion",
+      "Shockwave", "Explosion", "Particle Explosion",
     ],
   },
   {
@@ -38,7 +42,9 @@ export const generatorLibrary = [
     category: "Spatial",
     generators: [
       "Sphere 3D", "Cube 3D", "Torus 3D", "Helix 3D", "Galaxy 3D", "Orbital Systems",
-      "Volumetric Cloud",
+      "Volumetric Cloud", "Particle Sphere", "Particle Torus", "DNA Helix", "Particle Galaxy",
+      "Particle Cube", "Klein Bottle", "Mandelbulb", "Wave Surface", "Particle Fabric",
+      "Wormhole", "Crystal Formation", "Atomic Structure", "Fluid Sculpture",
     ],
   },
 ] as const;
@@ -153,14 +159,16 @@ export function getGeneratorPoint(
       return point(Math.cos(angle) * distance, Math.sin(angle) * distance, 1.2 - depth * 0.7);
     }
     case "Sphere":
-    case "Sphere 3D": {
+    case "Sphere 3D":
+    case "Particle Sphere": {
       const z = 1 - 2 * progress;
       const ringRadius = Math.sqrt(Math.max(0, 1 - z * z));
       const angle = item * goldenAngle;
       return point(Math.cos(angle) * ringRadius, z, 0.55 + (z + 1) * 0.225);
     }
     case "Helix":
-    case "Helix 3D": {
+    case "Helix 3D":
+    case "DNA Helix": {
       const angle = progress * Math.PI * 12;
       const depth = 0.55 + 0.45 * (Math.sin(angle) + 1) * 0.5;
       return point(Math.cos(angle) * 0.58, progress * 2 - 1, depth);
@@ -290,7 +298,8 @@ export function getGeneratorPoint(
       const distance = 0.22 + ring / rings * 0.78;
       return point(Math.cos(angle) * distance, Math.sin(angle) * distance);
     }
-    case "Explosion": {
+    case "Explosion":
+    case "Particle Explosion": {
       const rays = Math.max(8, Math.round(Math.sqrt(total)));
       const angle = item % rays / rays * Math.PI * 2;
       const distance = Math.sqrt(Math.floor(item / rays) / Math.max(Math.ceil(total / rays) - 1, 1));
@@ -320,12 +329,34 @@ export function getGeneratorPoint(
       const y = row / Math.max(rows - 1, 1) * 2 - 1;
       return point(x, y + Math.sin(x * Math.PI * 4 + row % 2 * Math.PI) * 0.035);
     }
+    case "Particle Torus":
     case "Torus 3D": {
       const u = progress * Math.PI * 2 * Math.max(3, Math.sqrt(total) / 3);
       const v = item * goldenAngle;
-      const ring = 0.58 + 0.28 * Math.cos(v);
-      return point(Math.cos(u) * ring, Math.sin(u) * ring + Math.sin(v) * 0.28, 0.65 + (Math.cos(v) + 1) * 0.175);
+      const ring = 0.58 + 0.30 * Math.cos(v);
+      return point(Math.cos(u) * ring, Math.sin(u) * ring + Math.sin(v) * 0.28,
+        0.6 + (Math.cos(v) + 1) * 0.2);
     }
+    case "Particle Galaxy":
+    case "Galaxy 3D":
+    case "Orbital Systems": {
+      const arms = generator === "Particle Galaxy" ? 5 : generator === "Orbital Systems" ? 7 : 4;
+      const arm = item % arms;
+      const distance = Math.sqrt(Math.floor(item / arms) / Math.max(Math.ceil(total / arms) - 1, 1));
+      const angle = distance * Math.PI * (generator === "Particle Galaxy" ? 7 : 2) + arm * (Math.PI * 2 / arms);
+      return point(Math.cos(angle) * distance, Math.sin(angle) * distance * 0.68,
+        0.5 + (1 - distance) * 0.7);
+    }
+    case "Möbius Structure": {
+      const v = progress * Math.PI * 2;
+      const u = (item / Math.max(total - 1, 1) - 0.5) * 2.4;
+      const radius = 0.9 + 0.28 * Math.cos(v * 0.5);
+      const x = (radius + u * Math.cos(v / 2)) * Math.cos(v);
+      const y = (radius + u * Math.cos(v / 2)) * Math.sin(v);
+      const z = u * Math.sin(v / 2);
+      return point(x, y, 0.55 + (z + 1.2) * 0.24);
+    }
+    case "Particle Cube":
     case "Cube 3D": {
       const face = item % 6;
       const u = seeded(item * 2) * 2 - 1;
@@ -338,14 +369,81 @@ export function getGeneratorPoint(
       if (face === 4) return point(u, v, depth);
       return point(-u, v, depth);
     }
-    case "Galaxy 3D":
-    case "Orbital Systems": {
-      const arms = generator === "Galaxy 3D" ? 4 : 7;
-      const arm = item % arms;
-      const distance = Math.sqrt(Math.floor(item / arms) / Math.max(Math.ceil(total / arms) - 1, 1));
-      const angle = distance * Math.PI * (generator === "Galaxy 3D" ? 5 : 2) + arm * Math.PI * 2 / arms;
-      return point(Math.cos(angle) * distance, Math.sin(angle) * distance * 0.62,
-        0.5 + 0.5 * (1 - distance));
+    case "Klein Bottle": {
+      const t = progress * Math.PI * 2;
+      const s = (item / Math.max(total - 1, 1)) * Math.PI * 2;
+      const x = (2 + Math.cos(s)) * Math.cos(t) * 0.8;
+      const y = (2 + Math.cos(s)) * Math.sin(t) * 0.8;
+      const z = Math.sin(s) * Math.cos(t / 2) * 0.8;
+      return point(x, y, 0.6 + (z + 1) * 0.22);
+    }
+    case "Mandelbulb": {
+      const u = (seeded(item + 4) - 0.5) * 2;
+      const v = (seeded(item + 9) - 0.5) * 2;
+      const w = (seeded(item + 12) - 0.5) * 2;
+      const radius = Math.sqrt(u * u + v * v + w * w);
+      const fractal = 0.28 + Math.sin(radius * 14 + item) * 0.12;
+      return point(u * fractal, v * fractal, w * fractal * 1.15);
+    }
+    case "Wave Surface": {
+      const u = (item / Math.max(total - 1, 1) - 0.5) * 2.4;
+      const v = ((item % Math.max(6, Math.round(Math.sqrt(total)))) / Math.max(5, Math.round(Math.sqrt(total)))) * 2.4 - 1.2;
+      const z = Math.sin(u * 4.5) * 0.65 + Math.cos(v * 5.5) * 0.5;
+      return point(u, v, 0.5 + (z + 1.2) * 0.28);
+    }
+    case "Particle Flower": {
+      const theta = progress * Math.PI * 2 * 8;
+      const petal = Math.sin(theta) * 0.8;
+      const radius = 0.25 + Math.abs(Math.cos(theta * 3)) * 0.7;
+      return point(Math.cos(theta) * radius, Math.sin(theta) * radius * 0.65 + petal * 0.15, 0.62 + petal * 0.25);
+    }
+    case "Volumetric Smoke":
+    case "Particle Fabric": {
+      const x = gaussian(item * 2) * 0.46;
+      const y = gaussian(item * 2 + 1) * 0.46;
+      const z = Math.sin((item / Math.max(total - 1, 1)) * Math.PI * 14) * 0.5;
+      return point(x + Math.sin(y * 6) * 0.14, y + Math.cos(x * 7) * 0.12, 0.55 + (z + 0.8) * 0.24);
+    }
+    case "Wormhole": {
+      const angle = progress * Math.PI * 2 * 16;
+      const distance = 0.12 + progress * 0.85;
+      const tunnel = 1 - progress;
+      return point(Math.cos(angle) * distance, Math.sin(angle) * distance, 0.45 + tunnel * 0.7);
+    }
+    case "Energy Vortex": {
+      const angle = progress * Math.PI * 2 * 14;
+      const radius = Math.sqrt(progress);
+      const swirl = 1 - progress;
+      return point(Math.cos(angle) * radius, Math.sin(angle) * radius, 0.5 + swirl * 0.75);
+    }
+    case "Crystal Formation": {
+      const theta = item * goldenAngle;
+      const radius = 0.2 + (item / Math.max(total - 1, 1)) * 0.8;
+      const x = Math.cos(theta) * radius;
+      const y = Math.sin(theta) * radius * 0.8;
+      const z = Math.sin(theta * 5) * 0.8;
+      return point(x, y, 0.6 + (z + 1) * 0.22);
+    }
+    case "Atomic Structure": {
+      const orbit = item % 8;
+      const orbitCount = Math.max(6, Math.ceil(Math.sqrt(total)));
+      const step = Math.floor(item / orbitCount);
+      const angle = (orbit / orbitCount + step / Math.max(Math.ceil(total / orbitCount), 1)) * Math.PI * 2;
+      const radius = 0.18 + ((step % 5) / 5) * 0.58;
+      return point(Math.cos(angle) * radius, Math.sin(angle) * radius, 0.5 + Math.cos(angle * 3) * 0.15);
+    }
+    case "Particle Knot": {
+      const t = progress * Math.PI * 2 * 3.6;
+      const x = Math.sin(t) + 2 * Math.sin(2 * t);
+      const y = Math.cos(t) - 2 * Math.cos(2 * t);
+      const z = -Math.sin(3 * t) * 0.7;
+      return point(x * 0.22, y * 0.22, 0.55 + (z + 0.9) * 0.22);
+    }
+    case "Fluid Sculpture": {
+      const u = (item / Math.max(total - 1, 1) - 0.5) * 2.4;
+      const v = (seeded(item + 6) - 0.5) * 2.5;
+      const z = Math.sin(u * 5.3) + Math.cos(v * 4.8) + Math.sin((u + v) * 3.7);
+      return point(u + Math.sin(v * 3) * 0.12, v * 0.6, 0.5 + (z + 1.5) * 0.2);
     }
     default:
       return point((seeded(item * 2) - 0.5) * 2, (seeded(item * 2 + 1) - 0.5) * 2);

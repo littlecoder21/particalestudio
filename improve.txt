@@ -1,576 +1,499 @@
-# MASTER DEVELOPMENT PROMPT — Particle Studio Shape & Pattern Designer
-
-## Project Context
-
-You are working on my existing Particle Studio repository:
-
-`littlecoder21/particalestudio`
-
-Particle Studio already has:
-- Canvas-based particle rendering.
-- Procedural particle generators.
-- SVG import and path sampling.
-- Multiple SVG sources and morph sequences.
-- Procedural WebGL2 shader generator.
-- Shader masks and built-in shape definitions.
-- Shader layers, effects and interactions.
-- Particle and shader export systems.
-
-I want to add a powerful, professional **Shape & Pattern Designer** as a new dedicated workspace.
-
-This is NOT a simple shape picker, SVG uploader, or preset gallery.
-
-I want users to CREATE their own shapes, patterns, geometry and mathematical formations visually, without manually writing SVG paths or JavaScript.
-
-The result should be a versatile geometry creation environment that integrates with both the existing Particle Engine and Shader Engine.
-
----
-
-# PHASE 1 — INSPECT THE EXISTING ARCHITECTURE
-
-Before coding:
-
-1. Inspect the complete repository structure.
-2. Understand the current particle source and shape generation system.
-3. Inspect SVG import, parsing, path sampling and morphing.
-4. Inspect the shader mask and geometry systems.
-5. Identify existing reusable geometry utilities.
-6. Understand how the UI workspaces and navigation are structured.
-7. Identify how generated geometry currently reaches the particle renderer and shader renderer.
-
-Do not start by creating a separate disconnected implementation.
-
-Prepare an architecture report identifying:
-- Existing reusable modules.
-- Missing functionality.
-- Files that need modification.
-- New modules that should be created.
-- Integration points.
-
-Preserve the existing architecture wherever possible.
-
-# PHASE 2 — BUILD A PROFESSIONAL VECTOR SHAPE EDITOR
-
-Create a dedicated visual vector editor.
-
-## Drawing tools
-
-Implement:
-
-- Selection tool.
-- Pen tool.
-- Freehand drawing.
-- Polygon tool.
-- Rectangle tool.
-- Rounded rectangle tool.
-- Ellipse and circle tool.
-- Line tool.
-- Polyline tool.
-- Star tool.
-- Spiral tool.
-- Custom path tool.
-
-## Advanced path editing
-
-The editor must support:
-
-- Add and delete anchor points.
-- Move individual nodes.
-- Convert points between corner and smooth nodes.
-- Bézier handles.
-- Independent handle adjustment.
-- Symmetrical handles.
-- Curve continuity.
-- Close and open paths.
-- Multiple paths.
-- Path duplication.
-- Path grouping.
-- Path ordering.
-- Undo and redo.
-- Copy and paste.
-- Zoom and pan.
-- Snap to grid.
-- Alignment guides.
-- Numeric coordinate editing.
-
-## Advanced geometry operations
-
-Implement:
-
-- Union.
-- Subtract.
-- Intersect.
-- Exclude.
-- Offset path.
-- Expand and contract.
-- Simplify path.
-- Round corners.
-- Stroke to outline.
-- Combine and separate paths.
-
-Preserve holes and disconnected contours correctly.
-
-Do not simulate Boolean operations using visual approximations. Use a reliable geometry algorithm or a suitable library if necessary.
-
-# PHASE 3 — MATHEMATICAL SHAPE GENERATOR
-
-Create a dedicated mathematical geometry engine.
-
-Users should be able to generate and edit shapes through mathematical parameters.
-
-Include:
-
-### Parametric curves
-- Rose curves.
-- Lissajous curves.
-- Hypotrochoids.
-- Epitrochoids.
-- Spirographs.
-- Cycloids.
-- Epicycloids.
-- Hypocycloids.
-- Superformula curves.
-- Polar curves.
-- Custom parametric equations.
-
-### Mathematical geometry
-- Superellipse.
-- Rounded polygons.
-- Regular and irregular polygons.
-- Star polygons.
-- Gear shapes.
-- Concentric circles.
-- Spiral geometry.
-- Logarithmic spirals.
-- Fibonacci spirals.
-- Wave geometry.
-
-### Fractal geometry
-- Koch snowflake.
-- Sierpinski triangle.
-- Sierpinski carpet.
-- Dragon curve.
-- Hilbert curve.
-- Recursive branching.
-- Fractal trees.
-- Custom recursive geometry.
-
-### SDF-based geometry
-- Circle.
-- Box.
-- Rounded box.
-- Capsule.
-- Triangle.
-- Polygon.
-- Star.
-- Ring.
-- Arc.
-- Custom combinations.
-
-Every mathematical generator should expose meaningful controls.
-
-For example, a Rose Curve should support:
-- Petal count.
-- Radius.
-- Rotation.
-- Inner radius.
-- Complexity.
-- Sampling resolution.
-- Distortion.
-
-Do not create fake controls. Each parameter must actually change the geometry.
-
-# PHASE 4 — ADVANCED PATTERN DESIGNER
-
-Create a separate Pattern Designer within the workspace.
-
-The user must be able to create complex patterns from simple geometry.
-
-## Pattern systems
-
-Implement:
-
-- Radial repetition.
-- Linear repetition.
-- Grid repetition.
-- Circular repetition.
-- Spiral repetition.
-- Mirror symmetry.
-- Rotational symmetry.
-- Kaleidoscope.
-- Voronoi patterns.
-- Cellular patterns.
-- Organic patterns.
-- Geometric tiling.
-- Wave interference.
-- Moiré patterns.
-- Nested shapes.
-- Recursive patterns.
-
-## Pattern controls
-
-Expose:
-
-- Count.
-- Spacing.
-- Rotation.
-- Scale.
-- Offset.
-- Randomness.
-- Seed.
-- Symmetry.
-- Distribution.
-- Density.
-- Inner and outer radius.
-- Row and column counts.
-- Pattern distortion.
-- Animation phase.
-
-Support multiple pattern layers.
-
-Allow one pattern to use another shape or pattern as its source.
-
-# PHASE 5 — SHAPE DISTRIBUTION ENGINE
-
-This is critical because Particle Studio needs geometry that can be consumed by its particle system.
-
-Create a unified sampling engine.
-
-Supported sampling modes:
-
-1. Outline sampling.
-2. Filled-area sampling.
-3. Uniform distribution.
-4. Random distribution.
-5. Weighted distribution.
-6. Density distribution.
-7. Grid distribution.
-8. Poisson-disc distribution.
-9. Adaptive curve sampling.
-10. Interior and exterior sampling.
-
-Advanced settings:
-
-- Point count.
-- Point spacing.
-- Density.
-- Random seed.
-- Edge weighting.
-- Center weighting.
-- Distribution falloff.
-- Sampling resolution.
-- Minimum distance.
-- Maximum distance.
-- Shape bounds.
-- Aspect ratio preservation.
-
-Ensure that holes, disconnected paths and complex contours are respected.
-
-Avoid uneven particle spacing on curves.
-
-# PHASE 6 — ORGANIC AND PROCEDURAL SHAPES
-
-Add tools for creating less geometric, more organic forms.
-
-Include:
-
-- Organic blobs.
-- Metaball-like shapes.
-- Flowing contours.
-- Noise-distorted outlines.
-- Cellular forms.
-- Fluid-like silhouettes.
-- Fractal contours.
-- Branching structures.
-- Voronoi cells.
-- Randomized organic polygons.
-
-Expose controls for:
-- Noise type.
-- Noise scale.
-- Distortion strength.
-- Smoothness.
-- Complexity.
-- Seed.
-- Animation.
-- Number of iterations.
-
-Where possible, use deterministic seeded randomness so the same settings reproduce the same geometry.
-
-# PHASE 7 — LIVE EDITING AND PREVIEW
-
-The workspace needs a large interactive design canvas.
-
-Required behavior:
-
-- Live geometry preview.
-- Real-time node editing.
-- Drag handles.
-- Zoom and pan.
-- Fit to canvas.
-- Grid and rulers.
-- Selection highlighting.
-- Multiple selected objects.
-- Multi-layer geometry.
-- Live pattern updates.
-- Responsive interaction.
-- Mobile-friendly touch controls.
-
-Editing a shape must update the preview immediately.
-
-Avoid rebuilding expensive geometry on every pointer movement when it can be updated incrementally.
-
-Use efficient geometry caching and controlled recalculation.
-
-# PHASE 8 — UNIFIED GEOMETRY DATA MODEL
-
-This is one of the most important architectural requirements.
-
-Create a shared geometry representation that can be consumed by multiple systems.
-
-Conceptually, it should support:
-
-- Vector paths.
-- Bézier curves.
-- Polygons.
-- Multiple contours.
-- Holes.
-- Transformations.
-- Pattern instances.
-- Mathematical generator parameters.
-- Sampling settings.
-- Bounds.
-- Optional animation parameters.
-
-The exact TypeScript structure must be designed after inspecting the existing repository.
-
-The unified geometry must support these operations:
-
-1. Render as editable vector geometry.
-2. Export as SVG.
-3. Convert to particle positions.
-4. Convert to shader mask data.
-5. Animate between compatible shapes.
-6. Use as an input to procedural shader generators.
-7. Reuse geometry in pattern systems.
-
-Do not create incompatible geometry formats for every editor.
-
-Do not unnecessarily replace existing SVG source types. Build adapters or migrations where appropriate.
-
-# PHASE 9 — PARTICLE STUDIO INTEGRATION
-
-Add a new source option to the existing particle creation workflow:
-
-**Custom Designer Shape**
-
-Users should be able to:
-
-- Open Shape Designer.
-- Create a shape.
-- Save it.
-- Return to the particle workspace.
-- Use it as the particle source.
-- Change particle distribution.
-- Animate particles into the shape.
-- Morph between multiple designed shapes.
-
-Keep existing SVG import and morph functionality working.
-
-Support both manually created and mathematically generated geometry.
-
-# PHASE 10 — SHADER STUDIO INTEGRATION
-
-Integrate the geometry system with the existing shader workspace.
-
-Allow designed geometry to become:
-
-- Shader masks.
-- SDF shapes.
-- Repeating shader patterns.
-- Geometry-based displacement masks.
-- Procedural pattern inputs.
-- Layer masks.
-- Animated shape boundaries.
-
-The geometry should be usable by the shader renderer without unnecessary CPU-side conversion every frame.
-
-Choose appropriate representations for each operation, such as vector paths, raster masks, signed-distance fields or GPU textures.
-
-Do not force all geometry into one representation if that would damage performance or quality.
-
-# PHASE 11 — SHAPE LIBRARY AND PRESETS
-
-Create a library for user-created geometry.
-
-Features:
-
-- Save custom shapes.
-- Save patterns.
-- Save mathematical configurations.
-- Rename.
-- Duplicate.
-- Delete.
-- Organize into categories.
-- Search.
-- Preview thumbnails.
-- Import and export JSON.
-- Export SVG.
-- Reopen and edit previously saved designs.
-
-Include starter examples, but never make presets the only way to create geometry.
-
-# PHASE 12 — ANIMATION AND MORPHING
-
-Support geometry animation where practical.
-
-Include:
-
-- Point movement.
-- Curve deformation.
-- Shape scaling and rotation.
-- Pattern count animation.
-- Pattern rotation.
-- Noise deformation.
-- Morph between compatible shapes.
-- Animated mathematical parameters.
-- Timeline and keyframes.
-
-Preserve topology where necessary for reliable morphing.
-
-When two shapes have incompatible geometry, provide a sensible resampling or correspondence strategy rather than assuming their point indices match.
-
-# PHASE 13 — EXPORT
-
-Support:
-
-- SVG export.
-- JSON project export.
-- Particle position data.
-- Geometry data.
-- PNG preview.
-- Shader mask texture.
-- Reusable geometry presets.
-
-Keep export formats compatible with the existing Particle Studio export architecture.
-
-# PHASE 14 — PERFORMANCE AND RELIABILITY
-
-The editor must remain responsive with complex geometry.
+# MASTER DEVELOPMENT PROMPT — PARTICLE STUDIO ADVANCED 3D & PROCEDURAL PARTICLE ENGINE
+
+You are a senior graphics engineer, WebGL developer, computational geometry specialist, and creative software architect.
+
+Your task is to transform the existing Particle Studio project into a professional, advanced procedural particle creation platform.
+
+Repository: `littlecoder21/particalestudio`
+
+The goal is to create a powerful particle system capable of generating complex 2D and genuine 3D particle structures, volumetric formations, fluid-like surfaces, organic sculptures, mathematical geometry, and interactive particle simulations.
+
+IMPORTANT: This is an upgrade to an existing application, NOT a replacement project.
+
+## 1. FIRST: AUDIT THE EXISTING PROJECT
+
+Before changing anything:
+
+- Inspect the complete repository structure.
+- Review particleEngine.ts, generators.ts, App.tsx, settings models, rendering utilities, SVG import, shape designer, shader system, preset system, JSON loader, and export functionality.
+- Understand how existing particle positions, physics, animation, interactions, and presets work.
+- Identify reusable components and architectural limitations.
+- Identify existing features that could break during the upgrade.
+- Create an implementation plan based on the actual code.
+
+Do not assume the current implementation is identical to a typical particle library.
+
+Preserve existing features and saved projects.
+
+## 2. CREATE A REAL 3D PARTICLE ENGINE
+
+Introduce a dedicated 3D particle simulation and rendering architecture.
+
+Every 3D particle must support:
+
+- Position: x, y, z.
+- Velocity: vx, vy, vz.
+- Acceleration: ax, ay, az.
+- Mass and optional force response.
+- Particle size and depth.
+- Rotation and orientation.
+- Color and opacity.
+- Lifetime and age.
+- Individual or shared animation phase.
+- Optional surface attachment and formation identity.
+
+Implement a genuine 3D camera system:
+
+- Perspective camera.
+- Orthographic camera.
+- Camera position and target.
+- Camera rotation.
+- Field of view.
+- Near and far clipping.
+- Zoom.
+- Orbit controls.
+- Pan and dolly.
+- Optional auto-rotation.
+- Depth sorting where required.
+
+The 3D engine must calculate and render actual spatial geometry. Do not fake depth by scaling 2D coordinates.
+
+## 3. BUILD 20 EDITABLE 3D PRESETS
+
+Implement these 20 presets as procedural geometry generators:
+
+1. Particle Sphere
+2. Particle Torus
+3. DNA Helix
+4. Particle Galaxy
+5. Möbius Structure
+6. Particle Cube
+7. Klein Bottle
+8. Mandelbulb
+9. Wave Surface
+10. Particle Flower
+11. Volumetric Smoke
+12. Particle Fabric
+13. Wormhole
+14. Energy Vortex
+15. Crystal Formation
+16. Neural Network
+17. Atomic Structure
+18. Particle Knot
+19. Particle Explosion
+20. Fluid Sculpture
+
+Every preset must have its own actual mathematical or geometric generation method.
 
 Requirements:
 
-- Efficient path rendering.
-- Geometry caching.
-- Debounced expensive operations.
-- Incremental updates.
-- Adaptive sampling.
-- Avoid unnecessary React rerenders.
-- Web Workers for expensive geometry calculations where useful.
-- Memory cleanup.
-- Undo history limits.
-- Large-path protection.
-- Mobile performance.
+- Use parametric equations where appropriate.
+- Use signed distance fields for suitable volumetric shapes.
+- Use surface sampling for continuous surfaces.
+- Use volume sampling for solid formations.
+- Use procedural noise for organic structures.
+- Use fractal iteration for fractal formations.
+- Use spatial sampling for neural and network structures.
+- Use particle distributions that avoid visibly uneven clustering unless intentional.
 
-Never sacrifice editing accuracy simply to improve preview performance.
+Every preset must be editable after creation.
 
-# PHASE 15 — UI / UX DESIGN
+Do not implement these as 20 static images, screenshots, or fixed particle coordinates.
 
-Build a professional design environment inspired by the best parts of Figma, Illustrator and procedural geometry tools.
+## 4. BUILD A POWERFUL GEOMETRY SAMPLING ENGINE
 
-Suggested layout:
+Create a reusable geometry sampling system that can convert different types of geometry into particle formations.
 
-**Left sidebar**
-- Tools.
-- Layers.
-- Objects.
-- Shape library.
+Support:
 
-**Center**
-- Large design canvas.
-- Grid.
-- Selection controls.
-- Node handles.
-- Live preview.
+- Parametric surfaces.
+- Mathematical equations.
+- 3D primitives.
+- Custom procedural meshes.
+- Signed distance fields.
+- SVG paths and shapes.
+- Imported 3D models where feasible.
+- Image-to-particle sampling.
+- Text-to-particle formations.
+- Existing Shape Designer geometry.
 
-**Right sidebar**
-- Geometry properties.
-- Curve controls.
-- Mathematical parameters.
-- Pattern controls.
-- Distribution settings.
+Sampling modes:
 
-**Top toolbar**
-- Workspace tabs.
-- Undo/redo.
-- Zoom.
-- Save.
-- Import/export.
-- Preview mode.
+- Uniform surface sampling.
+- Random surface sampling.
+- Volume sampling.
+- Edge sampling.
+- Vertex sampling.
+- Density-weighted sampling.
+- Poisson disk sampling.
+- Blue-noise distribution.
+- Gradient-weighted sampling.
 
-Keep Shape Designer as its own workspace. Do not overload the existing particle or shader panels.
+Expose sampling density, randomness, spacing, particle count, and distribution controls.
 
-Make it responsive for desktop and touch devices.
+Create a common geometry interface so new generators can be added without rewriting the simulation engine.
 
----
+## 5. ADVANCED PARTICLE FABRIC SYSTEM
 
-# NON-NEGOTIABLE DEVELOPMENT RULES
+A major priority is recreating the flowing translucent particle fabric from the supplied visual reference.
 
-1. Inspect before implementing.
-2. Do not rewrite the entire application.
-3. Do not remove or break existing functionality.
-4. Preserve all existing particle generators and presets.
-5. Preserve the current shader engine and its presets.
-6. Preserve SVG import and morph sequences.
-7. Reuse existing utilities wherever practical.
-8. Avoid unnecessary dependencies.
-9. Do not implement fake or decorative controls.
-10. Every visible control must work.
-11. Use TypeScript types properly.
-12. Keep geometry logic separate from UI components.
-13. Keep the new editor modular.
-14. Preserve backward compatibility with existing projects.
-15. Do not make unrelated changes.
+Build a dedicated geometry-driven particle fabric generator.
 
-# IMPLEMENTATION WORKFLOW
+It must support:
 
-Do not attempt to implement all phases in one massive change.
+- Parametric ribbon surfaces.
+- Multiple folded surfaces.
+- Twisted ribbons.
+- Organic cloth-like deformation.
+- Variable surface width.
+- Wave deformation.
+- Curvature control.
+- Fold frequency and intensity.
+- Surface thickness.
+- Multiple overlapping layers.
+- Particle density variation.
+- Localized turbulence.
+- Animated surface displacement.
 
-Work in stages:
+The particles must follow the surface and create a continuous, fine-grained appearance.
 
-**Stage 1:** Repository inspection and architecture proposal.
+The fabric should be able to stretch, twist, fold, undulate, and evolve over time.
 
-**Stage 2:** Unified geometry data model and vector editor foundation.
+Add a mode for particles to detach from the surface and return to it.
 
-**Stage 3:** Pen tool, node editing and Bézier handles.
+Do not simply use random particles with a smoke effect to imitate this appearance.
 
-**Stage 4:** Mathematical shape generator.
+## 6. ADVANCED 3D PHYSICS AND MOTION
 
-**Stage 5:** Pattern designer.
+Implement a modular force-field system:
 
-**Stage 6:** Distribution and sampling engine.
+- Gravity.
+- Attractors.
+- Repellers.
+- Vortex fields.
+- Curl noise.
+- Turbulence.
+- Magnetic fields.
+- Fluid-like forces.
+- Spring forces.
+- Cohesion.
+- Separation.
+- Alignment.
+- Collision.
+- Surface attraction.
+- Directional fields.
+- Radial fields.
+- Wave forces.
+- Custom force fields.
 
-**Stage 7:** Particle Studio integration.
+Support force blending and configurable influence radius.
 
-**Stage 8:** Shader Studio integration.
+Implement physically stable simulation using a fixed timestep and frame-rate-independent integration.
 
-**Stage 9:** Shape library and export.
+Add substeps where required.
 
-**Stage 10:** Animation, optimization and testing.
+Use a spatial acceleration structure such as a 3D spatial hash, grid, or octree for proximity operations and collision queries.
 
-At the end of each stage:
+Avoid checking every particle against every other particle when spatial acceleration is available.
 
-- List the exact files created and modified.
-- Explain the implementation.
-- Run TypeScript checks and relevant tests.
-- Test existing functionality for regressions.
-- Report unfinished functionality honestly.
-- Wait for approval before proceeding to the next major stage.
+## 7. ADVANCED PARTICLE BEHAVIOR BUILDER
 
-# FINAL PRODUCT VISION
+Allow users to combine multiple behaviors into one particle system.
 
-I want Particle Studio to have a real geometry creation environment.
+Examples:
 
-I should be able to open the editor and manually draw a complicated butterfly, create a spiral galaxy using mathematical equations, design a complex radial pattern, generate organic shapes, edit every Bézier point, and turn any of these designs into particles or shader geometry.
+- Orbit + turbulence + attraction.
+- Curl flow + surface following.
+- Explosion + vortex + gravity.
+- Fluid deformation + particle cohesion.
+- Galaxy rotation + radial attraction.
 
-**The key objective is creative freedom: users must be able to construct shapes and patterns themselves, not merely choose from a collection of predefined shapes.**
+Each behavior should have:
+
+- Enable/disable.
+- Intensity.
+- Scale.
+- Speed.
+- Radius.
+- Direction.
+- Falloff.
+- Blend mode.
+- Animation controls.
+
+Allow behavior stacking without hardcoding a separate simulation for every combination.
+
+## 8. ADVANCED 3D RENDERING
+
+Create a professional rendering architecture.
+
+Prefer WebGL2 for GPU-accelerated rendering.
+
+Support:
+
+- GPU instanced particle rendering.
+- Point sprites.
+- Circular particle sprites.
+- Soft particle rendering.
+- Depth-aware transparency.
+- Additive blending.
+- Alpha blending.
+- Screen blending where appropriate.
+- Particle trails.
+- Volumetric-looking density.
+- Soft lighting.
+- Edge illumination.
+- Ambient lighting.
+- Bloom/glow.
+- Depth-based opacity.
+- Perspective particle sizing.
+- Optional motion blur.
+
+Use GPU simulation with ping-pong textures or transform feedback when appropriate and compatible with the existing architecture.
+
+Do not create a separate WebGL context for every particle layer.
+
+Use shared rendering resources and carefully manage GPU memory.
+
+Provide Canvas 2D fallback when WebGL2 is unavailable.
+
+## 9. 3D INTERACTION SYSTEM
+
+Support mouse and touch interaction in 3D space.
+
+Implement:
+
+- 3D attract.
+- 3D repel.
+- Swirl.
+- Vortex.
+- Push and pull.
+- Surface distortion.
+- Local fluid displacement.
+- Velocity injection.
+- Particle scattering.
+- Particle gathering.
+- Multiple simultaneous interaction points where supported.
+
+Use camera raycasting or equivalent screen-to-world coordinate conversion.
+
+Support pointer velocity and pressure when available.
+
+Interactions should affect the actual 3D simulation, not just the displayed screen positions.
+
+## 10. PARTICLE APPEARANCE AND MATERIAL SYSTEM
+
+Add professional appearance controls:
+
+- Particle shape.
+- Particle size.
+- Size variation.
+- Opacity.
+- Color palette.
+- Depth color variation.
+- Density.
+- Glow.
+- Emission.
+- Light intensity.
+- Edge brightness.
+- Surface shading.
+- Noise texture.
+- Grain.
+- Softness.
+
+Support color gradients along geometry, particle age, depth, and velocity.
+
+Make restrained, realistic lighting possible. Do not force excessive rainbow colors or unnecessary glow.
+
+## 11. TIMELINE AND MORPHING
+
+Add advanced animation capabilities:
+
+- Formation morphing.
+- Shape-to-shape transitions.
+- Geometry deformation.
+- Particle reassignment.
+- Explode and reform.
+- Looping.
+- Ping-pong animation.
+- Easing curves.
+- Animation timeline.
+- Keyframe support.
+
+Preserve particle identity where practical during morphing.
+
+Support transitions between different particle counts without visible sudden jumps.
+
+## 12. EDITOR EXPERIENCE
+
+Add a dedicated 3D workspace with:
+
+- 3D viewport.
+- Camera controls.
+- Preset browser.
+- Geometry controls.
+- Particle controls.
+- Physics controls.
+- Force-field editor.
+- Appearance controls.
+- Animation timeline.
+- Layer management.
+- Performance information.
+
+Allow users to edit all 20 presets.
+
+Keep the existing 2D workflow intact.
+
+Avoid placing every new control into the existing interface at once. Organize advanced features into clear panels and collapsible sections.
+
+## 13. PERFORMANCE AND SCALABILITY
+
+Performance is a core requirement.
+
+Implement:
+
+- Fixed-timestep simulation.
+- Frame-rate-independent physics.
+- GPU-based simulation where appropriate.
+- Instanced rendering.
+- Spatial acceleration structures.
+- Object pooling.
+- Typed arrays for large particle datasets.
+- Efficient buffer updates.
+- Adaptive rendering quality.
+- Device pixel ratio management.
+- Particle count limits based on available resources.
+- Proper resource cleanup.
+- Pause and resume.
+- Visibility-aware rendering.
+
+Provide quality modes:
+
+- Low.
+- Medium.
+- High.
+- Ultra.
+
+Avoid allocating large temporary objects inside the animation loop.
+
+Avoid unnecessary GPU-to-CPU readbacks.
+
+Do not rebuild geometry every frame when only vertex positions need updating.
+
+Provide performance statistics: FPS, active particle count, simulation time, rendering time, and GPU capability where measurable.
+
+## 14. PROJECT FORMAT AND COMPATIBILITY
+
+Preserve the existing project JSON format wherever possible.
+
+Introduce versioned settings for new 3D functionality.
+
+Implement migrations for older project files.
+
+Ensure existing:
+
+- 2D particle presets.
+- SVG import.
+- Shape Designer.
+- SVG morphing.
+- Existing generators.
+- Interactions.
+- Shader effects.
+- JSON loading.
+- HTML/CSS/JS export.
+- Video export.
+
+Continue to work.
+
+Do not remove existing features or silently change their behavior.
+
+## 15. EXPORT SYSTEM
+
+Extend exports to support 3D particle creations.
+
+Support:
+
+- Standalone HTML.
+- JavaScript.
+- WebGL-based standalone output.
+- Configuration JSON.
+- High-resolution image export.
+- Video export.
+- Transparent-background export where technically possible.
+
+Exported animations must reproduce the actual particle simulation and appearance.
+
+Do not export only screenshots or static approximations of interactive effects.
+
+## 16. TESTING AND ACCEPTANCE CRITERIA
+
+The work is not complete merely because the interface contains new controls.
+
+Verify:
+
+1. All 20 presets generate real 3D particle geometry.
+2. Camera orbit, pan, zoom, and perspective work.
+3. Particles have actual depth and spatial positions.
+4. Geometry sampling works at different particle counts.
+5. Physics remains stable at different frame rates.
+6. Force fields work in three dimensions.
+7. Particle Fabric generates continuous folded structures.
+8. Morphing works between compatible and different geometries.
+9. Existing 2D presets continue to work.
+10. Existing project JSON files remain loadable.
+11. WebGL resources are correctly disposed.
+12. Exported results match the editor.
+13. Performance is measured rather than assumed.
+14. Fallback rendering works where supported.
+
+Create automated tests for geometry sampling, mathematical generators, settings migration, and simulation behavior.
+
+## IMPLEMENTATION STRATEGY
+
+Do not attempt a risky total rewrite in one step.
+
+Implement in phases:
+
+Phase 1: Architecture audit, compatibility plan, simulation/rendering separation, fixed timestep.
+
+Phase 2: Real 3D particle data model, camera, renderer, and first 3D primitives.
+
+Phase 3: Geometry sampling engine and all 20 procedural generators.
+
+Phase 4: Particle Fabric, volumetric formations, and advanced 3D motion.
+
+Phase 5: Force-field builder, interaction system, and particle morphing.
+
+Phase 6: Appearance, timeline, editor UI, and exports.
+
+Phase 7: Performance optimization, automated tests, and compatibility verification.
+
+After each phase, verify that existing functionality still works.
+
+## STRICT DEVELOPMENT RULES
+
+- Work with the actual repository architecture.
+- Preserve existing functionality.
+- Do not replace the existing application with a new demo.
+- Do not introduce fake 3D effects.
+- Do not create preset thumbnails as substitutes for working generators.
+- Do not leave placeholder controls.
+- Do not implement every feature as one enormous particleEngine.ts file.
+- Use clean TypeScript interfaces and modular systems.
+- Avoid unnecessary dependencies.
+- Reuse existing components where appropriate.
+- Do not delete working features to simplify implementation.
+- Do not claim a feature is complete without testing it.
+
+At the end of each phase, report:
+1. Files changed.
+2. New functionality.
+3. Existing functionality preserved.
+4. Tests performed and results.
+5. Known limitations.
+6. Recommended next phase.
+
+FINAL OBJECTIVE:
+
+Transform Particle Studio into an advanced creative particle platform where users can build, manipulate, animate, and export complex 2D and genuine 3D particle systems.
+
+The system should be capable of creating realistic particle fabric, volumetric smoke, fluid sculptures, mathematical surfaces, galaxies, fractals, organic structures, and interactive 3D particle formations through a unified, extensible procedural engine.
