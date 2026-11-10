@@ -38,7 +38,7 @@ import LibraryPanel, { type InsertAt } from "./LibraryPanel";
 import { applyLook } from "./looks";
 import { importMaskFile, maskPixelsFor, sourceField, type MaskPixels } from "./mask";
 import MaskPanel from "./MaskPanel";
-import { PALETTE_LIBRARY, SHADER_PRESETS } from "./presets";
+import { PALETTE_LIBRARY, PRESET_GROUPS, SHADER_PRESETS } from "./presets";
 import { DEFAULT_PROJECT, cloneProject, normalizeProject, randomPalette, randomProject } from "./project";
 import { ShaderRenderer, type RendererStats } from "./renderer";
 import { newLayer } from "./stack";
@@ -73,7 +73,7 @@ const SECTIONS: Array<{ id: SectionId; icon: string; label: string; hint: string
   { id: "presets", icon: "✦", label: "Presets", hint: `${SHADER_PRESETS.length} looks`, title: "Ready-made looks", description: "Start from a finished shader, then make it yours." },
   { id: "field", icon: "◎", label: "Field", hint: "Generator", title: "Base generator", description: "Pick the procedural field and shape it with four knobs." },
   { id: "stack", icon: "▤", label: "Stack", hint: "Layers", title: "Layer stack", description: "Order, blend and mix as many layers as you like." },
-  { id: "elements", icon: "❖", label: "Elements", hint: "Library", title: "Element library", description: "Backgrounds, gradients, patterns, light and texture — tap to add." },
+  { id: "elements", icon: "❖", label: "Elements", hint: "700 pieces", title: "Element library", description: "Backgrounds, gradients, fields, patterns, light, texture and recipes — 100 of each, tap to add." },
   { id: "text", icon: "T", label: "Text", hint: "Typography", title: "Text shader", description: "Create interactive, animated typography for hero sections and website components." },
   { id: "mask", icon: "◩", label: "Shape", hint: "Image mask", title: "Image mask", description: "Turn a PNG, SVG or built-in silhouette into a living shader shape." },
   { id: "motion", icon: "↻", label: "Motion", hint: "Time & warp", title: "Time & warp", description: "Speed, rotation, symmetry and domain distortion." },
@@ -284,6 +284,7 @@ export default function ShaderStudio({ active, modeSwitch, designerRequest }: Sh
   const [isSaved, setIsSaved] = useState<boolean>(saved !== null);
   const [customPresets, setCustomPresets] = useState<ShaderPreset[]>(customPresetStore.presets);
   const [query, setQuery] = useState("");
+  const [presetGroup, setPresetGroup] = useState<string>("All");
   const [toast, setToast] = useState<string | null>(null);
   const [stats, setStats] = useState<RendererStats>({ fps: 60, quality: 1 });
   const [error, setError] = useState<string | null>(null);
@@ -698,8 +699,16 @@ export default function ShaderStudio({ active, modeSwitch, designerRequest }: Sh
     [customPresets, query],
   );
   const filteredPresets = useMemo(() => {
-    return SHADER_PRESETS.filter(matchesPreset);
-  }, [query]);
+    return SHADER_PRESETS.filter((preset) => (presetGroup === "All" || preset.group === presetGroup) && matchesPreset(preset));
+  }, [query, presetGroup]);
+  /* with no search and no shelf chosen, the built-in presets are shown shelf by shelf */
+  const presetShelves = useMemo(
+    () =>
+      presetGroup === "All" && !query.trim()
+        ? PRESET_GROUPS.map((name) => ({ name, presets: filteredPresets.filter((preset) => preset.group === name) })).filter((shelf) => shelf.presets.length > 0)
+        : [],
+    [filteredPresets, presetGroup, query],
+  );
 
   const sectionMeta =
     section === "mask" && project.geometryMode
@@ -759,6 +768,21 @@ export default function ShaderStudio({ active, modeSwitch, designerRequest }: Sh
               />
               <small>{filteredPresets.length + filteredCustomPresets.length}</small>
             </div>
+            <div className="family-row" role="tablist" aria-label="Preset groups">
+              {["All", ...PRESET_GROUPS].map((name) => (
+                <button
+                  key={name}
+                  type="button"
+                  role="tab"
+                  aria-selected={name === presetGroup}
+                  className={`family-chip small ${name === presetGroup ? "active" : ""}`}
+                  onClick={() => setPresetGroup(name)}
+                >
+                  {name}
+                  <span className="chip-count">{name === "All" ? SHADER_PRESETS.length : SHADER_PRESETS.filter((preset) => preset.group === name).length}</span>
+                </button>
+              ))}
+            </div>
             {filteredCustomPresets.length > 0 && (
               <>
                 <h3 className="preset-shelf-heading">My presets</h3>
@@ -775,17 +799,37 @@ export default function ShaderStudio({ active, modeSwitch, designerRequest }: Sh
                 </div>
               </>
             )}
-            <h3 className="preset-shelf-heading">Built-in presets</h3>
-            <div className="preset-grid">
-              {filteredPresets.map((preset) => (
-                <PresetCard
-                  key={preset.name}
-                  preset={preset}
-                  active={preset.name === activePreset}
-                  onPick={() => applyProject(preset.project, preset.name)}
-                />
-              ))}
-            </div>
+            {presetShelves.length > 0 ? (
+              presetShelves.map((shelf) => (
+                <section key={shelf.name} className="element-section">
+                  <h3 className="preset-shelf-heading">{shelf.name} · {shelf.presets.length}</h3>
+                  <div className="preset-grid">
+                    {shelf.presets.map((preset) => (
+                      <PresetCard
+                        key={preset.name}
+                        preset={preset}
+                        active={preset.name === activePreset}
+                        onPick={() => applyProject(preset.project, preset.name)}
+                      />
+                    ))}
+                  </div>
+                </section>
+              ))
+            ) : (
+              <>
+                <h3 className="preset-shelf-heading">{presetGroup === "All" ? "Built-in presets" : presetGroup}</h3>
+                <div className="preset-grid">
+                  {filteredPresets.map((preset) => (
+                    <PresetCard
+                      key={preset.name}
+                      preset={preset}
+                      active={preset.name === activePreset}
+                      onPick={() => applyProject(preset.project, preset.name)}
+                    />
+                  ))}
+                </div>
+              </>
+            )}
             {filteredPresets.length + filteredCustomPresets.length === 0 && <p className="field-help">No preset matches “{query}”.</p>}
             <button type="button" className="svg-upload-button" onClick={surprise}>
               <span>⚄</span> Surprise me

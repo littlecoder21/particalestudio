@@ -480,4 +480,80 @@ vec4 FIELD(vec2 p, float t, vec4 K){
   return vec4(v, wall * .6, clamp(1. - w.x, 0., 1.), 0.);
 }`,
   },
+
+  /* ───────────────────────────── Cosmic additions ───────────────────────────── */
+  {
+    id: "accretion",
+    name: "Accretion Smoke",
+    category: "Cosmic",
+    description: "A smoky black hole: hair-fine gas filaments are dragged into a tilted spiral around a soft dark core, with a thin lensing ring. Reacts to the pointer; hold to feed it.",
+    roles: ["Warm edge", "Cool edge", "Mid glow", "Hot core", "Lens ring"],
+    uses: ["noise"],
+    knobs: [k("Mass", 0.5, 1.8, 0.01, 1), k("Turbulence", 0.2, 1.8, 0.01, 1), k("Filaments", 0.3, 2.2, 0.01, 1), k("Tilt", -1, 1.6, 0.01, 0.64)],
+    glsl: /* glsl */`
+vec4 FIELD(vec2 p, float t, vec4 K){
+  vec2 ctr = vec2(-.025, .075) + uMouse * .1;
+  vec2 q = p - ctr;
+  float rho = length(q) + 1e-4;
+  float tilt = K.w + uMouse.x * .05;
+  float R = .105 * K.x * (1. + .16 * uPress);
+  vec2 ax = rot(-tilt) * q;
+  float a = ax.x;
+  float b = ax.y - .06 * a * abs(a);
+
+  /* gas is dragged into a tight spiral close to the hole and straightens into the tails */
+  float tw = (1.05 + .6 * K.y) * exp(-rho * 2.9) * (1. + .5 * uPress);
+  vec2 s = rot(tw) * ax;
+  float tt = t * .05;
+
+  /* ink-like swirls: warp the streak coordinates with two octaves of noise */
+  vec2 w1 = vec2(gnoise(s * 2.3 + vec2(tt, 0.)), gnoise(s * 2.3 + vec2(7.3, -tt))) * .05 * K.y;
+  vec2 w2 = vec2(gnoise(s * 5.1 + w1 * 6. + vec2(-tt, 3.1)), gnoise(s * 5.1 + w1 * 6. + vec2(1.9, tt))) * .018 * K.y;
+  vec2 u = s + w1 + w2;
+
+  /* sharp, hair-fine filaments: fast across the flow, slow along it */
+  float fr = 24. * K.z;
+  float hair = gnoise(vec2(u.x * 1.3 - tt * 1.6, u.y * fr)) * .55
+             + gnoise(vec2(u.x * 2.4 - tt * 2.2 + 3., u.y * fr * 2.1 + 1.7)) * .3
+             + gnoise(vec2(u.x * 4.2 - tt * 2.6, u.y * fr * 4.2 - 5.)) * .17;
+  float cloud = fbm(u * 1.9 + vec2(tt, 0.));
+  float tex = smoothstep(-.42, .5, hair * 1.3 + cloud * .8);
+
+  /* envelope: a bar through the hole that fans out to the upper right and narrows into a tail */
+  float kk = smoothstep(-.3, .3, a);
+  float wU = .09 + .1 * smoothstep(0., .8, a);
+  float wL = .115 - .065 * smoothstep(0., .8, -a);
+  float wd = mix(wL, wU, kk);
+  float across = exp(-b * b / (wd * wd));
+  float la = max(-a, 0.) / .75;
+  float ra = pow(max(a, 0.) / .9, 1.7);
+  float along = mix(exp(-la * la), exp(-ra), kk);
+  float env = across * along;
+  float loopBand = exp(-pow((rho - R * 1.7) / (R * .9), 2.));
+  float dens = max(env * (.1 + 1.15 * tex), loopBand * (.38 + .85 * tex));
+
+  /* a soft, smoky hole instead of a hard disc */
+  float hole = 1. - smoothstep(R * .75, R * 1.45, rho + (tex - .5) * .09);
+  dens *= 1. - .97 * hole;
+
+  float side = smoothstep(-.1, .45, a);
+  vec3 edge = mix(palAt(1), palAt(0), side);
+  float d = max(dens, 0.);
+  vec3 col = mix(vec3(0.), edge, smoothstep(0., .28, d));
+  col = mix(col, palAt(2), smoothstep(.3, .75, d));
+  col = mix(col, palAt(3), smoothstep(.78, 1.25, d));
+  col += palAt(0) * .05 * hole * tex;
+
+  /* thin lensing ring: partial, strongest on the side that spins towards us */
+  float rr = rho + (tex - .5) * .02;
+  float rg = (rr - R * 1.9) / (.006 * K.x + .003);
+  float ring = exp(-rg * rg);
+  float dop = .1 + .9 * smoothstep(-.2, .9, dot(q / rho, vec2(.78, .3)));
+  col += palAt(4) * ring * dop * (.7 + .6 * uPress) * (.3 + tex);
+
+  gCol = col;
+  gHas = 1.;
+  return vec4(d, 0., d, 0.);
+}`,
+  },
 ];

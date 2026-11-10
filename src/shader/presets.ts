@@ -1,71 +1,11 @@
+import { mk } from "./presetBuilder";
 import { defaultKnobs } from "./generators";
-import { DEFAULT_MASK, DEFAULT_PROJECT, normalizeProject } from "./project";
-import { newBaseLayer, newLayer } from "./stack";
-import { DEFAULT_TOUCH } from "./touch";
-import type {
-  BlendMode,
-  GeneratorId,
-  LayerKind,
-  ShaderLayer,
-  ShaderMask,
-  ShaderPreset,
-  ShaderProject,
-  TouchSettings,
-} from "./types";
+import { PACK_PRESETS } from "./presetPacks";
+import type { ShaderPreset } from "./types";
 
-type StackLayer = Partial<ShaderLayer> & { kind: LayerKind };
+export { mk } from "./presetBuilder";
 
-type Extra = Partial<Omit<ShaderProject, "generator" | "knobs" | "palette" | "accent" | "name" | "layers" | "mask" | "touch">> & {
-  /** shorthand for one generator layer on top of the stack */
-  overlay?: { enabled?: boolean; generator?: GeneratorId; blend?: BlendMode; opacity?: number };
-  /** extra layers above the main field, top layer first */
-  layers?: StackLayer[];
-  mask?: Partial<ShaderMask>;
-  touch?: Partial<TouchSettings>;
-};
-
-export function mk(
-  name: string,
-  tag: string,
-  generator: GeneratorId,
-  knobs: number[],
-  palette: string[],
-  accent: string,
-  extra: Extra = {},
-): ShaderPreset {
-  const { overlay, layers, mask, touch, ...rest } = extra;
-  const stack: ShaderLayer[] = [];
-  if (overlay?.enabled) {
-    const g = overlay.generator ?? "stars";
-    stack.push(newLayer("field", {
-      name: "Overlay",
-      generator: g,
-      knobs: defaultKnobs(g),
-      blend: overlay.blend ?? "Add",
-      opacity: overlay.opacity ?? 0.7,
-      ownColors: false,
-    }));
-  }
-  for (const layer of layers ?? []) stack.push(newLayer(layer.kind, layer));
-  stack.push(newBaseLayer());
-
-  const project = normalizeProject({
-    ...DEFAULT_PROJECT,
-    ...rest,
-    name,
-    generator,
-    knobs,
-    palette,
-    palettePositions: undefined,
-    accent,
-    layers: stack,
-    mask: { ...DEFAULT_MASK, ...mask },
-    touch: { ...DEFAULT_TOUCH, ...touch },
-  });
-  return { name, tag, project };
-}
-
-export const SHADER_PRESETS: ShaderPreset[] = [
+const CLASSIC_PRESETS: ShaderPreset[] = [
   /* ── Fluid ── */
   mk("Midnight Ink", "Slow indigo smoke", "fluid", [1.4, 1, 1.1, 0],
     ["#05060f", "#141a52", "#3a4fd6", "#8ab4ff", "#f2f7ff"], "#9fe8ff",
@@ -80,25 +20,10 @@ export const SHADER_PRESETS: ShaderPreset[] = [
     ["#f7efe9", "#f3c9d6", "#c9b6f2", "#a8d8f0", "#fbf7ff"], "#ffffff",
     { vignette: 0.1, contrast: 0.95, grain: 0.1, relief: 0.6, shine: 0.5, speed: 0.7 }),
 
-  /* ── Black holes ── */
-  mk("Event Horizon", "The original lensing hole", "blackhole", [1, 1, 1, 0.66],
-    ["#734a2e", "#296ba8", "#b3dbeb", "#f7f5ed", "#8cd9ff"], "#8cd9ff",
+  /* ── The black hole ── */
+  mk("Event Horizon", "Smoky lensing hole", "accretion", [1, 1, 1, 0.64],
+    ["#6b4a36", "#3f86a3", "#bcd6dc", "#f4f7f3", "#bfeaf2"], "#bfeaf2",
     { tone: 1, grain: 0.04, vignette: 0.25 }),
-  mk("Ember Singularity", "Fiery accretion disk", "blackhole", [1.1, 1.2, 1.2, 0.5],
-    ["#8c290d", "#591a47", "#ff8c40", "#ffebc7", "#ffb359"], "#ffb359",
-    { tone: 1, grain: 0.04, vignette: 0.3 }),
-  mk("Aurora Maw", "Green-violet void", "blackhole", [0.9, 0.9, 1.4, 0.8],
-    ["#1a8c61", "#4d33a6", "#8cf2d9", "#ebfff7", "#b3ffcc"], "#b3ffcc",
-    { tone: 1, grain: 0.04, vignette: 0.3 }),
-  mk("Mono Lens", "Monochrome gravity", "blackhole", [1.2, 0.8, 0.7, 0.3],
-    ["#4d4d4d", "#333842", "#bfc4cc", "#ffffff", "#e6f2ff"], "#e6f2ff",
-    { tone: 1, grain: 0.06, vignette: 0.35 }),
-  mk("Black Hole", "Gravitational lens and starfield", "blackhole", [1.15, 0.85, 1.2, 0.55],
-    ["#432522", "#1a4779", "#75c7e8", "#fff1bd", "#ff8f3d"], "#b9edff",
-    {
-      speed: 0.9, glow: 0.42, tone: 0.15, vignette: 0.58, grain: 0.08,
-      overlay: { enabled: true, generator: "stars", blend: "Add", opacity: 0.42 },
-    }),
 
   /* ── Light ── */
   mk("Northern Veil", "Aurora over a starry sky", "aurora", [1, 0.5, 1, 1],
@@ -328,6 +253,30 @@ export const SHADER_PRESETS: ShaderPreset[] = [
       ],
     }),
 ];
+
+/** Presets-tab collections, in display order. */
+export const PRESET_GROUPS = [
+  "Fluid & Liquid", "Cosmic", "Light & Energy", "Pattern & Geometry", "Nature & Organic",
+  "Flow & Noise", "Math & Fractal", "Gradients & Minimal", "Shapes", "Layered looks",
+] as const;
+
+const CLASSIC_GROUPS: Record<string, (typeof PRESET_GROUPS)[number]> = {};
+const classic = (group: (typeof PRESET_GROUPS)[number], names: string[]) => names.forEach((n) => { CLASSIC_GROUPS[n] = group; });
+classic("Fluid & Liquid", ["Midnight Ink", "Molten Gold", "Neon Smoke", "Opal Milk", "Deep Ocean", "Liquid Chrome", "Sunset Swell", "Lava Lamp", "Blue Jelly", "Satin Ribbons", "Midnight Silk", "Mesh Gradient", "Sunrise Mesh", "Pool Light"]);
+classic("Cosmic", ["Event Horizon", "Deep Nebula", "Crimson Cloud", "Spiral Galaxy", "Rose Galaxy", "Wormhole", "Hyperdrive", "Julia Bloom", "Dream Orbs"]);
+classic("Light & Energy", ["Northern Veil", "Polar Ember", "Arctic Glass", "Acid Plasma", "Sunset Plasma", "Kaleido Bloom", "Solar Burst", "Divine Light", "Plasma Arcs", "Violet Storm", "City Bokeh"]);
+classic("Pattern & Geometry", ["Cracked Neon", "Stained Glass", "Cellular Bloom", "Low-Poly Dusk", "Emerald Crystal", "Hex Pulse", "Neon Grid", "Hologram Net", "Topographic", "Agate Slice", "Ripple Moiré", "Sonar Rings", "Halftone Bloom"]);
+classic("Shapes", ["Aurora Butterfly", "Ember Skull", "Chrome Heart", "Smoke Moon", "Particle Flower", "Echo Star", "Hologram Drop"]);
+classic("Layered looks", ["Dream Haze", "Synthwave Horizon", "Paper Print", "Deep Sea Glass", "Gilded Night"]);
+
+/**
+ * Every built-in preset: the original looks plus the collection packs in ./presetPacks,
+ * ordered by collection (the original looks keep their place at the start of each one).
+ */
+export const SHADER_PRESETS: ShaderPreset[] = [
+  ...CLASSIC_PRESETS.map((preset): ShaderPreset => ({ ...preset, group: CLASSIC_GROUPS[preset.name] ?? "Layered looks" })),
+  ...PACK_PRESETS,
+].sort((a, b) => PRESET_GROUPS.indexOf(a.group as never) - PRESET_GROUPS.indexOf(b.group as never));
 
 /** Ready-to-use palettes for the colour panel (dark → light). Some carry their own stop positions. */
 export const PALETTE_LIBRARY: Array<{ name: string; colors: string[]; accent: string; positions?: number[]; soft?: number }> = [

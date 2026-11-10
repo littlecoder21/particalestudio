@@ -1,4 +1,4 @@
-import { LIBRARY_ITEMS, cssSwatch, thumbProject } from "./library";
+import { LIBRARY_ITEMS, cssSwatch, thumbProject, type LibraryFamily, type LibraryItem } from "./library";
 import { MASK_LOOKS } from "./looks";
 import { maskPixelsSync } from "./mask";
 import { SHADER_PRESETS } from "./presets";
@@ -56,14 +56,33 @@ class ThumbStore {
     this.schedule(400);
   }
 
-  /** Library elements that need a real shader render (gradients and solids use CSS). */
-  startLibrary(): void {
-    const jobs: Job[] = LIBRARY_ITEMS.filter((it) => cssSwatch(it) === null).map((it) => ({
-      key: libraryThumbKey(it.id),
-      project: () => thumbProject(it),
-    }));
-    this.add(jobs, true);
+  /**
+   * Library elements that need a real shader render (plain gradients and solids use CSS).
+   * Pass the family being looked at (and optionally one of its groups) to bake those first;
+   * everything else follows in the background. Calling it again with another family or group
+   * moves that part of the library to the front of the queue.
+   */
+  startLibrary(family: LibraryFamily | "All" = "All", group = "All"): void {
+    const needsBake = LIBRARY_ITEMS.filter((it) => cssSwatch(it) === null);
+    const toJob = (it: LibraryItem): Job => ({ key: libraryThumbKey(it.id), project: () => thumbProject(it) });
+    const wanted = (it: LibraryItem): boolean => (family === "All" || it.family === family) && (group === "All" || it.group === group);
+    const first = needsBake.filter(wanted);
+    this.add(first.map(toJob), true); // first call: the visible shelf goes ahead of the preset queue
+    this.add(needsBake.map(toJob), false); // the rest of the library follows the presets
+    this.prioritize(first.map((it) => libraryThumbKey(it.id))); // later calls: move the shelf to the front
     if (this.timer === 0) this.schedule(60);
+  }
+
+  /** Move the queued jobs with these keys to the front (used for cards that scroll into view). */
+  prioritize(keys: Iterable<string>): void {
+    const wanted = new Set(keys);
+    if (wanted.size === 0 || this.queue.length === 0) return;
+    const front: Job[] = [];
+    const rest: Job[] = [];
+    for (const job of this.queue) (wanted.has(job.key) ? front : rest).push(job);
+    if (front.length === 0) return;
+    this.queue = [...front, ...rest];
+    if (this.timer === 0) this.schedule(30);
   }
 
   setPaused(paused: boolean): void {

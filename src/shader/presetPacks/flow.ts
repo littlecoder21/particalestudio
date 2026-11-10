@@ -1,0 +1,48 @@
+import { inGroup } from "../presetBuilder";
+import { pal } from "./palettes";
+
+const m = inGroup("Flow & Noise");
+
+/** Noise fields, curl-noise smoke, flow lines and vortices. */
+export const FLOW_PRESETS = [
+  m("Soft Static Clouds", "Blurry blue value noise", "valueNoise", [2.4, 4, 1.4, 0.5], pal("denim"), "#e6edf9",
+    { grain: 0.15, vignette: 0.25 }),
+  m("Blocky Dream", "Chunky pastel clouds", "valueNoise", [3.5, 2, 1.8, 0.4], pal("pastelDream"), "#fff9ec",
+    { grain: 0.2, vignette: 0.1 }),
+  m("Mocha Clouds", "Coffee and cream drift", "valueNoise", [1.8, 5, 1.1, 0.6], pal("copper"), "#ffe8d2",
+    { grain: 0.15, vignette: 0.3 }),
+  m("Smoke Signal", "Grey wisps rising", "simplexNoise", [2.2, 5, 0.55, 0.9], pal("graphite"), "#eceef2",
+    { vignette: 0.4, grain: 0.1, contrast: 1.1 }),
+  m("Silk Cloud", "Lavender simplex haze", "simplexNoise", [1.6, 4, 0.45, 0.6], pal("lavenderMist"), "#fbf9ff",
+    { vignette: 0.15, grain: 0.1 }),
+  m("Storm Front", "Steel-blue churning sky", "simplexNoise", [2.8, 6, 0.6, 1.4], pal("steel"), "#eef3fb",
+    { vignette: 0.45, contrast: 1.15 }),
+  m("Alpine Ridge", "Snowy crests at dusk", "ridgedNoise", [1.8, 1.8, 5, 0.4], pal("slate"), "#eef2f9",
+    { relief: 1, shine: 0.3, vignette: 0.35 }),
+  m("Lava Crust", "Glowing cracks in black rock", "ridgedNoise", [2.4, 2.4, 5, 0.7], pal("lava"), "#ffee9a",
+    { glow: 0.3, vignette: 0.45 }),
+  m("Dune Crest", "Saffron sand ridges", "ridgedNoise", [1.2, 1.1, 4, 0.3], pal("saffron"), "#fff5d6",
+    { relief: 1.2, lightAngle: 35, grain: 0.1 }),
+  m("Pebble Beach", "Smooth sandy stones", "cellular", [9, 0, 0.9, 0.3], pal("sand"), "#fff8e4",
+    { relief: 1.2, shine: 0.4, grain: 0.1 }),
+  m("Glass Cells", "Cold glassy cells", "cellular", [7, 1, 0.8, 0.7], pal("iceBlue"), "#ffffff",
+    { relief: 0.8, shine: 0.7, glow: 0.15 }),
+  m("Stained Pebbles", "Flat candy-coloured cells", "cellular", [10, 3, 1, 0.2], pal("candy"), "#fff4fb",
+    { grain: 0.12, saturation: 1.1 }),
+  m("Curl Smoke", "Graphite smoke on a breeze", "curlFlow", [1.6, 1.4, 4, 1], pal("ash"), "#f4f4f6",
+    { vignette: 0.4, grain: 0.1 }),
+  m("Ink Storm", "Indigo curls and eddies", "curlFlow", [2.2, 2.2, 5, 1.3], pal("indigo"), "#efeaff",
+    { glow: 0.2, vignette: 0.35 }),
+  m("Aurora Curl", "Neon green smoke", "curlFlow", [1.2, 1.8, 4, 0.8], pal("neonGreen"), "#e6fff4",
+    { glow: 0.35, vignette: 0.4 }),
+  m("Combed Silk", "Rose fibres in the wind", "flowLines", [1.2, 7, 90, 0.8], pal("rose"), "#fff0f5",
+    { grain: 0.1, vignette: 0.25 }),
+  m("Wind Lines", "Cold, fine streamlines", "flowLines", [0.9, 9, 120, 1.2], pal("iceBlue"), "#ffffff",
+    { vignette: 0.3 }),
+  m("Gold Strands", "Threads of light", "flowLines", [1.6, 6, 70, 0.6], pal("midnightGold"), "#fff0b8",
+    { glow: 0.2, vignette: 0.4 }),
+  m("Twin Vortex", "Two spinning pink-cyan eddies", "vortexField", [2, 3.5, 0.5, 2], pal("cyber"), "#fffd8a",
+    { glow: 0.2, vignette: 0.3 }),
+  m("Spin Grid", "A violet grid bent by whirlpools", "vortexField", [3, 4.5, 0.4, 0], pal("violet"), "#efe8ff",
+    { glow: 0.25, vignette: 0.35 }),
+];

@@ -21,6 +21,7 @@ export const GENERATOR_IDS = [
   "sdfShapes", "sdfBlend",
   "polarRose", "spiralArms", "lissajous", "moire", "mandelbrot", "kaliIfs",
   "turing", "membrane", "veins", "cellGrowth",
+  "accretion",
 ] as const;
 export type GeneratorId = (typeof GENERATOR_IDS)[number];
 
@@ -409,6 +410,8 @@ export interface ShaderProject {
 export interface ShaderPreset {
   name: string;
   tag: string;
+  /** collection the preset belongs to in the Presets tab */
+  group?: string;
   project: ShaderProject;
 }
 

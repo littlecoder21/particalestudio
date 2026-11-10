@@ -967,6 +967,62 @@
   color: #fff;
 }
 
+/* second row: the shelves (groups) inside the chosen family */
+.family-row.group-row {
+  margin-top: -2px;
+}
+
+.family-chip.small {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.family-chip .chip-count {
+  color: var(--ps-muted);
+  font-size: 10px;
+  font-weight: 700;
+  opacity: 0.8;
+}
+
+.family-chip.active .chip-count {
+  color: inherit;
+}
+
+/* a titled shelf of cards; off-screen shelves skip layout and paint so 700 cards stay light */
+.element-section {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 340px;
+}
+
+.element-heading {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 16px 0 8px;
+  color: #b7bac8;
+  font: 700 10px Manrope, sans-serif;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.element-heading small {
+  margin-left: auto;
+  color: var(--ps-muted);
+  font-size: 10px;
+}
+
+.element-heading .element-family {
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--ps-accent-soft);
+  color: #fff;
+  letter-spacing: 0.06em;
+}
+
 .library-bar .choice-control {
   flex: 1 1 auto;
 }
@@ -1037,11 +1093,13 @@
 }
 
 @media (max-width: 380px) {
+
   .element-grid,
   .mode-grid,
   .effect-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+
   .shape-grid {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
