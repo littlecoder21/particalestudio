@@ -1,11 +1,11 @@
-export type StudioMode = "particles" | "shaders" | "designer";
+export type StudioMode = "particles" | "shaders" | "designer" | "3d";
 
 interface ModeSwitchProps {
   mode: StudioMode;
   onChange: (mode: StudioMode) => void;
 }
 
-/** Segmented control that flips between the Particle studio and the Shader studio. */
+/** Segmented control that flips between the Particle studio, Shader studio, Designer and 3D studio. */
 export default function ModeSwitch({ mode, onChange }: ModeSwitchProps) {
   return (
     <div className="mode-switch" role="tablist" aria-label="Studio mode">
@@ -18,6 +18,16 @@ export default function ModeSwitch({ mode, onChange }: ModeSwitchProps) {
       >
         <span aria-hidden="true">✦</span>
         <b>Particles</b>
+      </button>
+      <button
+        type="button"
+        role="tab"
+        aria-selected={mode === "3d"}
+        className={mode === "3d" ? "active" : ""}
+        onClick={() => onChange("3d")}
+      >
+        <span aria-hidden="true">◉</span>
+        <b>3D</b>
       </button>
       <button
         type="button"
