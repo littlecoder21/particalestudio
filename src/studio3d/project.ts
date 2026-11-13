@@ -1,10 +1,11 @@
-import type { CameraSettings, GeneratorId, InteractionSettings, Layer, Look, PaletteStop, Project3D, QualityLevel, SimSettings, TimelineSettings, Vec3 } from "./types";
-import { MAX_LAYERS, SCHEMA_VERSION } from "./types";
+import type { CameraSettings, GeneratorId, InteractionSettings, Layer, LightBeam, LightBeamStyle, Look, PaletteStop, Project3D, QualityLevel, SimSettings, TimelineSettings, Vec3 } from "./types";
+import { MAX_LAYERS, MAX_LIGHT_BEAMS, SCHEMA_VERSION } from "./types";
 import { DEFAULT_CAMERA } from "./camera";
 import { EASING_NAMES, clamp, type EasingName } from "./math";
 import { makeBehavior, makeDeformer, newId, BEHAVIOR_TYPES, DEFORMER_TYPES } from "./behaviors";
 import { PALETTE_PRESETS } from "./palette";
 import { defaultParams, getGenerator, isGeneratorId, normalizeParams } from "./generators/index";
+import { makeLightBeam } from "./lightBeams";
 
 export const DEFAULT_LOOK: Look = {
   palette: PALETTE_PRESETS[0].stops.map((s) => ({ ...s })), size: 0.0075, sizeVariation: 0.35, sizeAttenuation: true, opacity: 0.85, emission: 1.1, shape: "soft", softness: 0.8, blend: "additive",
@@ -25,6 +26,7 @@ export function projectFromGenerator(id: GeneratorId, prev?: Project3D): Project
   const def = getGenerator(id), r = def.recipe, layer = makeLayer(id);
   return {
     version: SCHEMA_VERSION, name: def.name, count: r.count, layers: [layer], activeLayer: layer.id,
+      beams: prev ? prev.beams.map((beam) => ({ ...beam, origin: [...beam.origin] as Vec3 })) : [],
     look: { ...DEFAULT_LOOK, palette: DEFAULT_LOOK.palette.map((s) => ({ ...s })), ...(r.look ?? {}) } as Look,
     behaviors: (r.behaviors ?? []).map(makeBehavior), deformers: (r.deformers ?? []).map(makeDeformer), sim: { ...DEFAULT_SIM },
     camera: { ...DEFAULT_CAMERA, target: [0, 0, 0], ...(r.camera ?? {}) } as CameraSettings,
@@ -45,6 +47,36 @@ function palette(v: unknown, d: PaletteStop[] | null): PaletteStop[] | null {
   if (!Array.isArray(v)) return d;
   const out = v.filter(isObj).map((p) => ({ t: n(p.t, 0, 0, 1), color: color(p.color, "#ffffff") })).slice(0, 8);
   return out.length >= 2 ? out : d;
+}
+function parseBeam(raw: unknown, index: number): LightBeam | null {
+  if (!isObj(raw)) return null;
+  const defaults = makeLightBeam({ seed: index + 1 });
+  const position = vec(raw.origin, defaults.origin).map((value) => clamp(value, -4, 4)) as Vec3;
+  const direction = vec(raw.direction, [0, 1, 0]).map((value) => clamp(value, -1, 1)) as Vec3;
+  const directionLength = Math.hypot(...direction);
+  const legacyAzimuth = directionLength > 1e-6 ? Math.atan2(direction[0], direction[2]) * 180 / Math.PI : defaults.azimuth;
+  const legacyElevation = directionLength > 1e-6 ? Math.asin(clamp(direction[1] / directionLength, -1, 1)) * 180 / Math.PI : defaults.elevation;
+  return {
+    id: typeof raw.id === "string" ? raw.id.slice(0, 80) : defaults.id,
+    name: typeof raw.name === "string" ? raw.name.slice(0, 32) : defaults.name,
+    enabled: raw.enabled !== false,
+    style: s(raw.style, ["shaft", "fan", "arc", "helix"] as const, defaults.style) as LightBeamStyle,
+    origin: position,
+    azimuth: n(raw.azimuth, legacyAzimuth, -180, 180),
+    elevation: n(raw.elevation, legacyElevation, -89, 89),
+    length: n(raw.length, defaults.length, 0.05, 8),
+    width: n(raw.width, defaults.width, 0.002, 0.5),
+    spread: n(raw.spread, defaults.spread, 0, 3),
+    bend: n(raw.bend, defaults.bend, -2, 2),
+    twist: n(raw.twist, defaults.twist, -8, 8),
+    intensity: n(raw.intensity, defaults.intensity, 0, 2),
+    colorPosition: n(raw.colorPosition, defaults.colorPosition, 0, 1),
+    fadeIn: n(raw.fadeIn, defaults.fadeIn, 0.01, 1),
+    fadeOut: n(raw.fadeOut, defaults.fadeOut, 0.01, 1),
+    speed: n(raw.speed, defaults.speed, 0, 8),
+    motion: n(raw.motion, defaults.motion, 0, 1),
+    seed: Math.floor(n(raw.seed, index + 1, 0, 1e9)),
+  };
 }
 function look(raw: unknown, base: Look): Look {
   if (!isObj(raw)) return { ...base, palette: base.palette.map((p) => ({ ...p })) };
@@ -92,6 +124,7 @@ export function migrateProject(raw: unknown): MigrationResult {
   const steps = (Array.isArray(tl.steps) ? tl.steps : []).filter(isObj).filter((x) => isGeneratorId(x.generator)).slice(0, 12).map((x) => ({ id: typeof x.id === "string" ? x.id : newId("s"), generator: x.generator as GeneratorId, hold: n(x.hold, 3, 0.2, 60) }));
   const project: Project3D = {
     version: SCHEMA_VERSION, name: typeof raw.name === "string" ? raw.name.slice(0, 60) : "Imported project", count: Math.round(n(raw.count, base.count, 1000, 400000)), layers,
+    beams: (Array.isArray(raw.beams) ? raw.beams : []).slice(0, MAX_LIGHT_BEAMS).map(parseBeam).filter((beam): beam is LightBeam => beam !== null),
     activeLayer: layers.some((l) => l.id === raw.activeLayer) ? (raw.activeLayer as string) : layers[0].id, look: look(raw.look, DEFAULT_LOOK), behaviors, deformers,
     sim: { substeps: Math.round(n(simR.substeps, 1, 1, 4)), damping: n(simR.damping, 1, 0, 10), maxSpeed: n(simR.maxSpeed, 40, 1, 200), massVariation: n(simR.massVariation, 0, 0, 1), massInfluence: n(simR.massInfluence, 0, 0, 1) },
     camera: { projection: s(cam.projection, ["perspective", "orthographic"] as const, "perspective"), fov: n(cam.fov, 45, 15, 100), distance: n(cam.distance, 3.4, 0.5, 30), yaw: n(cam.yaw, 0.45, -50, 50), pitch: n(cam.pitch, 0.22, -1.55, 1.55), target: vec(cam.target, [0, 0, 0]), near: n(cam.near, 0.05, 0.001, 5), far: n(cam.far, 60, 5, 500), autoRotate: n(cam.autoRotate, 0.12, -3, 3) },

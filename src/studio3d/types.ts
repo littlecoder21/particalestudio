@@ -2,7 +2,7 @@ import type { EasingName, Vec3 } from "./math";
 import type { Rng } from "./math";
 
 export type { Vec3, EasingName };
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 3;
 export const MAX_LAYERS = 4;
 
 export type ParamValue = number | boolean | string;
@@ -15,13 +15,37 @@ export type ParamDef =
 
 export type GeneratorId =
   | "sphere" | "torus" | "helix" | "galaxy" | "mobius" | "cube" | "klein" | "mandelbulb" | "wave" | "flower"
-  | "smoke" | "fabric" | "wormhole" | "vortex" | "crystal" | "neural" | "atom" | "knot" | "explosion" | "fluid"
+  | "smoke" | "fabric" | "wormhole" | "vortex" | "crystal" | "dust-cloud" | "dust-veil" | "dust-motes" | "neural" | "atom" | "knot" | "explosion" | "fluid"
   | "geo-sphere" | "geo-cube" | "geo-torus" | "geo-torus-knot" | "geo-icosahedron" | "geo-dodecahedron" | "geo-octahedron" | "geo-tetrahedron" | "geo-pyramid" | "geo-helix"
   | "space-saturn" | "space-galaxy" | "space-black-hole" | "space-wormhole" | "space-nebula" | "space-asteroid" | "space-comet" | "space-supernova" | "space-star-cluster" | "space-planetary-system"
   | "nature-butterfly" | "nature-brain" | "nature-skull" | "nature-dna" | "nature-tree" | "nature-flower" | "nature-rose" | "nature-jellyfish" | "nature-seahorse" | "nature-dragon"
   | "math-klein-bottle" | "math-mobius-strip" | "math-trefoil-knot" | "math-mobius-torus" | "math-gyroid" | "math-mandelbulb" | "math-lorenz-attractor" | "math-clifford-attractor" | "math-fibonacci-spiral" | "math-spherical-harmonics"
   | "form-human-face" | "form-human-body" | "form-human-hand" | "form-eagle" | "form-wolf" | "form-lion" | "form-phoenix" | "form-dna-molecule" | "form-crystal-cluster" | "form-infinity"
   | "text3d";
+
+export const MAX_LIGHT_BEAMS = 20;
+export type LightBeamStyle = "shaft" | "fan" | "arc" | "helix";
+export interface LightBeam {
+  id: string;
+  name: string;
+  enabled: boolean;
+  style: LightBeamStyle;
+  origin: Vec3;
+  azimuth: number;
+  elevation: number;
+  length: number;
+  width: number;
+  spread: number;
+  bend: number;
+  twist: number;
+  intensity: number;
+  colorPosition: number;
+  fadeIn: number;
+  fadeOut: number;
+  speed: number;
+  motion: number;
+  seed: number;
+}
 
 /** One generated particle formation — structure of arrays, every array has length n (or 3n). */
 export interface Formation {
@@ -210,6 +234,7 @@ export interface Project3D {
   name: string;
   count: number;
   layers: Layer[];
+  beams: LightBeam[];
   activeLayer: string;
   look: Look;
   behaviors: Behavior[];

@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import "./studio3d.css";
-import type { Behavior, BehaviorType, Deformer, DeformerType, GeneratorId, Layer, Look, ParamDef, Project3D, QualityLevel } from "./types";
-import { MAX_LAYERS, QUALITY } from "./types";
+import type { Behavior, BehaviorType, Deformer, DeformerType, GeneratorId, Layer, LightBeam, LightBeamStyle, Look, ParamDef, Project3D, QualityLevel } from "./types";
+import { MAX_LAYERS, MAX_LIGHT_BEAMS, QUALITY } from "./types";
 import { OrbitCamera } from "./camera";
 import { Simulation } from "./simulation";
 import { GLRenderer, type Renderer, type RenderInput } from "./renderer";
@@ -10,14 +10,56 @@ import { PointerController } from "./interaction";
 import { GENERATORS, buildFormation, generateLayer, getGenerator, defaultParams } from "./generators/index";
 import { BEHAVIOR_DEFS, BEHAVIOR_TYPES, DEFORMER_DEFS, DEFORMER_TYPES, makeBehavior, makeDeformer, newId } from "./behaviors";
 import { DEFAULT_LOOK, defaultProject, makeLayer, migrateProject, projectFromGenerator, serializeProject } from "./project";
+import { makeLightBeam } from "./lightBeams";
 import { PALETTE_PRESETS, samplePalette } from "./palette";
-import { EASING_NAMES, type EasingName } from "./math";
+import { clamp, EASING_NAMES, type EasingName } from "./math";
 import { GradientEditor, Range, Section, Segmented, Select, TextField, Toggle, Vec3Input } from "./controls3d";
 import { EXPORT_FORMATS, build3DProjectZip, exportSlug, generate3DCode, type CodeBundle, type ExportFormat } from "./codeExport";
 
 const STORE_KEY = "particle-studio-3d-project-v1";
-type Tab = "presets" | "shape" | "interact" | "text" | "motion" | "look" | "camera" | "timeline" | "export";
-const TABS: { id: Tab; label: string }[] = [{ id: "presets", label: "Presets" }, { id: "shape", label: "Shape" }, { id: "interact", label: "Interact" }, { id: "text", label: "Text" }, { id: "motion", label: "Motion" }, { id: "look", label: "Look" }, { id: "camera", label: "Camera" }, { id: "timeline", label: "Timeline" }, { id: "export", label: "Export" }];
+type Tab = "presets" | "shape" | "dust" | "interact" | "text" | "motion" | "look" | "camera" | "timeline" | "export";
+const TABS: { id: Tab; label: string }[] = [{ id: "presets", label: "Presets" }, { id: "shape", label: "Shape" }, { id: "dust", label: "Dust & beams" }, { id: "interact", label: "Interact" }, { id: "text", label: "Text" }, { id: "motion", label: "Motion" }, { id: "look", label: "Look" }, { id: "camera", label: "Camera" }, { id: "timeline", label: "Timeline" }, { id: "export", label: "Export" }];
+const DUST_PRESETS: { id: GeneratorId; label: string }[] = [
+  { id: "dust-cloud", label: "Dust Cloud" },
+  { id: "dust-veil", label: "Dust Veil" },
+  { id: "dust-motes", label: "Floating Motes" },
+];
+const DOCK_KEY = "particle-studio-3d-dock";
+const DOCK_DEFAULT = 0.5;
+const DOCK_MIN = 0.28;
+const DOCK_MAX = 0.8;
+const BAR_H = 40;
+const CLOSE_BELOW = 110;
+const MOBILE_QUERY = "(max-width: 720px)";
+
+interface DockDrag {
+  id: number;
+  startY: number;
+  offset: number;
+  wsH: number;
+  wsBottom: number;
+  h: number;
+  moved: boolean;
+}
+
+function loadDock(): number {
+  try {
+    const value = Number(localStorage.getItem(DOCK_KEY));
+    return value >= DOCK_MIN && value <= DOCK_MAX ? value : DOCK_DEFAULT;
+  } catch {
+    return DOCK_DEFAULT;
+  }
+}
+
+function subscribeMobile(notify: () => void): () => void {
+  if (typeof matchMedia !== "function") return () => undefined;
+  const query = matchMedia(MOBILE_QUERY);
+  query.addEventListener("change", notify);
+  return () => query.removeEventListener("change", notify);
+}
+
+const getMobile = (): boolean => typeof matchMedia === "function" && matchMedia(MOBILE_QUERY).matches;
+const useMobile = (): boolean => useSyncExternalStore(subscribeMobile, getMobile, () => false);
 
 function loadSaved(): Project3D {
   try { const raw = localStorage.getItem(STORE_KEY); if (raw) return migrateProject(JSON.parse(raw)).project; } catch { /* ignore */ }
@@ -44,13 +86,16 @@ function makeThumb(id: GeneratorId): string {
 
 export default function Studio3D({ active, modeSwitch, initialProject }: { active: boolean; modeSwitch: ReactNode; initialProject?: Project3D }) {
   const [project, setProject] = useState<Project3D>(() => initialProject ? migrateProject(initialProject).project : loadSaved());
+  const mobile = useMobile();
   const [tab, setTab] = useState<Tab>("presets");
   const [presetSearch, setPresetSearch] = useState("");
   const [presetCategory, setPresetCategory] = useState("All");
   const [exportFormat, setExportFormat] = useState<ExportFormat>("standaloneHtml");
   const [exportBundle, setExportBundle] = useState<CodeBundle | null>(null);
   const [textDraft, setTextDraft] = useState("PARTICLE");
-  const [dockOpen, setDockOpen] = useState(true);
+  const [collapsed, setCollapsed] = useState(false);
+  const [dockFrac, setDockFrac] = useState<number>(loadDock);
+  const [settle, setSettle] = useState(0);
   const [stats, setStats] = useState({ fps: 0, sim: 0, gpu: 0, n: 0, backend: "", gpuName: "", hdr: false, active: 1 });
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
@@ -61,6 +106,9 @@ export default function Studio3D({ active, modeSwitch, initialProject }: { activ
   const [recording, setRecording] = useState(false);
   const hostRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const workspaceRef = useRef<HTMLDivElement | null>(null);
+  const dockRef = useRef<HTMLElement | null>(null);
+  const dragRef = useRef<DockDrag | null>(null);
   const simRef = useRef<Simulation | null>(null);
   const camRef = useRef<OrbitCamera | null>(null);
   const rendRef = useRef<Renderer | null>(null);
@@ -75,6 +123,76 @@ export default function Studio3D({ active, modeSwitch, initialProject }: { activ
   const count = Math.min(project.count, q.maxCount);
   const activeLayer = project.layers.find((l) => l.id === project.activeLayer) ?? project.layers[0];
   const upd = useCallback((fn: (p: Project3D) => Project3D) => setProject((p) => fn(p)), []);
+
+  useEffect(() => {
+    try { localStorage.setItem(DOCK_KEY, String(dockFrac)); } catch { /* storage can be unavailable in private windows */ }
+  }, [dockFrac]);
+  useLayoutEffect(() => {
+    const dock = dockRef.current;
+    if (!dock) return;
+    dock.style.height = "";
+    dock.style.transition = "";
+    dock.classList.remove("dragging");
+  }, [collapsed, dockFrac, settle]);
+  const onBarPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if ((event.target as HTMLElement).closest("button")) return;
+    const workspace = workspaceRef.current, dock = dockRef.current;
+    if (!workspace || !dock) return;
+    const ws = workspace.getBoundingClientRect(), dr = dock.getBoundingClientRect();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    dragRef.current = {
+      id: event.pointerId,
+      startY: event.clientY,
+      offset: dr.top - event.clientY,
+      wsH: ws.height,
+      wsBottom: ws.bottom,
+      h: dr.height,
+      moved: false,
+    };
+  };
+  const onBarPointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const drag = dragRef.current, dock = dockRef.current;
+    if (!drag || !dock || drag.id !== event.pointerId) return;
+    if (!drag.moved) {
+      if (Math.abs(event.clientY - drag.startY) < 6) return;
+      drag.moved = true;
+      dock.classList.add("dragging");
+      dock.style.transition = "none";
+    }
+    drag.h = clamp(drag.wsBottom - (event.clientY + drag.offset), BAR_H, drag.wsH * DOCK_MAX);
+    dock.style.height = `${drag.h}px`;
+  };
+  const finishDockDrag = (event: ReactPointerEvent<HTMLDivElement>, cancelled: boolean) => {
+    const drag = dragRef.current;
+    if (!drag || drag.id !== event.pointerId) return;
+    dragRef.current = null;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+    if (!drag.moved) {
+      if (!cancelled) setCollapsed((value) => !value);
+      return;
+    }
+    if (drag.h < CLOSE_BELOW) setCollapsed(true);
+    else {
+      setCollapsed(false);
+      setDockFrac(clamp(drag.h / drag.wsH, DOCK_MIN, DOCK_MAX));
+    }
+    setSettle((value) => value + 1);
+  };
+  const onBarKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (event.target !== event.currentTarget) return;
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      setCollapsed((value) => !value);
+    } else if (event.key === "ArrowUp" || event.key === "ArrowDown") {
+      event.preventDefault();
+      const step = event.key === "ArrowUp" ? 0.06 : -0.06;
+      if (collapsed) {
+        if (step > 0) setCollapsed(false);
+        return;
+      }
+      setDockFrac((value) => clamp(value + step, DOCK_MIN, DOCK_MAX));
+    }
+  };
 
   /* engine lifecycle */
   useEffect(() => {
@@ -109,7 +227,7 @@ export default function Studio3D({ active, modeSwitch, initialProject }: { activ
       const t0 = performance.now();
       sim.update(dt); cam.update(dt);
       const simMs = performance.now() - t0;
-      const input: RenderInput = { n: sim.active, pos: sim.pos, vel: sim.vel, nrm: sim.nrm, t: sim.t, size: sim.size, alpha: sim.alpha, phase: sim.phase, layer: sim.layer, attrVersion: sim.attrVersion, time: sim.time, camera: cam, look: p.look, layers: p.layers.map((l) => ({ palette: l.palette, sizeMul: l.sizeMul, opacityMul: l.opacityMul })), bloomLevel: QUALITY[p.quality].bloom, focus: cam.distance, range: Math.max(0.5, sim.radius) };
+      const input: RenderInput = { n: sim.active, pos: sim.pos, vel: sim.vel, nrm: sim.nrm, t: sim.t, size: sim.size, alpha: sim.alpha, phase: sim.phase, layer: sim.layer, attrVersion: sim.attrVersion, time: sim.time, camera: cam, look: p.look, layers: p.layers.map((l) => ({ palette: l.palette, sizeMul: l.sizeMul, opacityMul: l.opacityMul })), beams: p.beams, bloomLevel: QUALITY[p.quality].bloom, focus: cam.distance, range: Math.max(0.5, sim.radius) };
       renderer.render(input);
       frames++; acc += dt;
       if (adaptiveRef.current) { const ft = dt * 1000; if (ft > 24) { slow++; fast = 0; } else if (ft < 14) { fast++; slow = 0; } else { slow = 0; fast = 0; } if (slow > 40 && scale > 0.25) { scale *= 0.85; sim.setActiveFraction(scale); slow = 0; } if (fast > 240 && scale < 1) { scale = Math.min(1, scale * 1.08); sim.setActiveFraction(scale); fast = 0; } } else if (scale < 1) { scale = 1; sim.setActiveFraction(1); }
@@ -128,7 +246,8 @@ export default function Studio3D({ active, modeSwitch, initialProject }: { activ
       setBusy(true);
       window.setTimeout(() => {
         try {
-          const f = buildFormation(projRef.current.layers, count, 1);
+          const current = projRef.current;
+          const f = buildFormation(current.layers, count, 1);
           if (firstLoad.current || sim.n === 0) { sim.load(f); firstLoad.current = false; } else sim.morphTo(f, { duration: morphDur.current, easing: "easeInOut" });
           morphDur.current = 0.5;
         } finally { setBusy(false); }
@@ -175,8 +294,23 @@ export default function Studio3D({ active, modeSwitch, initialProject }: { activ
   };
   const addLayer = (g: GeneratorId) => upd((p) => { if (p.layers.length >= MAX_LAYERS) return p; const l = makeLayer(g, { seed: p.layers.length + 1, share: 0.5, name: getGenerator(g).name }); return { ...p, layers: [...p.layers, l], activeLayer: l.id }; });
   const setLayer = (id: string, patch: Partial<Layer>) => upd((p) => ({ ...p, layers: p.layers.map((l) => (l.id === id ? { ...l, ...patch } : l)) }));
+  const setBeam = (id: string, patch: Partial<LightBeam>) => upd((p) => ({ ...p, beams: p.beams.map((beam) => (beam.id === id ? { ...beam, ...patch } : beam)) }));
+  const addBeam = (style: LightBeamStyle = "shaft") => {
+    if (projRef.current.beams.length >= MAX_LIGHT_BEAMS) { setNotice(`Projects support up to ${MAX_LIGHT_BEAMS} light beams.`); return; }
+    upd((p) => {
+      if (p.beams.length >= MAX_LIGHT_BEAMS) return p;
+      const beam = makeLightBeam({ style, name: `${style[0].toUpperCase()}${style.slice(1)} beam ${p.beams.length + 1}`, seed: p.beams.length + 1 });
+      return { ...p, beams: [...p.beams, beam] };
+    });
+  };
+  const duplicateBeam = (beam: LightBeam) => {
+    if (projRef.current.beams.length >= MAX_LIGHT_BEAMS) { setNotice(`Projects support up to ${MAX_LIGHT_BEAMS} light beams.`); return; }
+    upd((p) => p.beams.length >= MAX_LIGHT_BEAMS ? p : {
+      ...p, beams: [...p.beams, { ...beam, id: newId("beam"), name: `${beam.name} copy`, origin: [...beam.origin] }],
+    });
+  };
   const setLook = (patch: Partial<Look>) => upd((p) => ({ ...p, look: { ...p.look, ...patch } }));
-  const snapshotInput = (): RenderInput | null => { const s = simRef.current, c = camRef.current; if (!s || !c) return null; const p = projRef.current; return { n: s.active, pos: s.pos, vel: s.vel, nrm: s.nrm, t: s.t, size: s.size, alpha: s.alpha, phase: s.phase, layer: s.layer, attrVersion: s.attrVersion + 1000000, time: s.time, camera: c, look: p.look, layers: p.layers.map((l) => ({ palette: l.palette, sizeMul: l.sizeMul, opacityMul: l.opacityMul })), bloomLevel: QUALITY[p.quality].bloom, focus: c.distance, range: Math.max(0.5, s.radius) }; };
+  const snapshotInput = (): RenderInput | null => { const s = simRef.current, c = camRef.current; if (!s || !c) return null; const p = projRef.current; return { n: s.active, pos: s.pos, vel: s.vel, nrm: s.nrm, t: s.t, size: s.size, alpha: s.alpha, phase: s.phase, layer: s.layer, attrVersion: s.attrVersion + 1000000, time: s.time, camera: c, look: p.look, layers: p.layers.map((l) => ({ palette: l.palette, sizeMul: l.sizeMul, opacityMul: l.opacityMul })), beams: p.beams, bloomLevel: QUALITY[p.quality].bloom, focus: c.distance, range: Math.max(0.5, s.radius) }; };
   const exportPng = async () => {
     const r = rendRef.current, inp = snapshotInput(), host = hostRef.current; if (!r || !inp || !host) return;
     const b = host.getBoundingClientRect(), w = Math.round(b.width * expOpts.scale), h = Math.round(b.height * expOpts.scale);
@@ -203,6 +337,59 @@ export default function Studio3D({ active, modeSwitch, initialProject }: { activ
     upd((p) => ({ ...p, layers: [...p.layers, layer], activeLayer: layer.id }));
     setTab("text");
   };
+  const beamPanel = (
+    <>
+      <Section title="Dust formations">
+        <p className="s3-hint">Choose one of three deterministic dust volumes. Their particles use the same simulation, interactions, and rendering as the other 3D formations.</p>
+        <div className="s3-actions">
+          {DUST_PRESETS.map((preset) => <button key={preset.id} type="button" className="s3-btn" onClick={() => choosePreset(preset.id)}>{preset.label}</button>)}
+        </div>
+      </Section>
+      <Section title={`Light beams · ${project.beams.length}/${MAX_LIGHT_BEAMS}`} right={
+        <Select value={"" as LightBeamStyle | ""} options={[
+          { value: "", label: "+ Add beam" } as never,
+          ...(["shaft", "fan", "arc", "helix"] as LightBeamStyle[]).map((style) => ({ value: style, label: style[0].toUpperCase() + style.slice(1) })),
+        ]} onChange={(style) => style && addBeam(style as LightBeamStyle)} />
+      }>
+        <p className="s3-hint">Light beams stay invisible; only existing particles inside them reflect the light. The same lights work with every 3D preset and never change particle size.</p>
+        {project.beams.map((beam, i) => (
+          <details key={beam.id} className={"s3-item" + (beam.enabled ? "" : " off")}>
+            <summary>
+              <input type="checkbox" checked={beam.enabled} onClick={(event) => event.stopPropagation()} onChange={(event) => setBeam(beam.id, { enabled: event.target.checked })} aria-label={`Enable ${beam.name}`} />
+              <span>{beam.name || `Beam ${i + 1}`}</span>
+            </summary>
+            <TextField label="Name" value={beam.name} onChange={(value) => setBeam(beam.id, { name: value.slice(0, 32) })} />
+            <Select label="Beam style" value={beam.style} options={[
+              { value: "shaft", label: "Soft shaft" },
+              { value: "fan", label: "Widening fan" },
+              { value: "arc", label: "Curved arc" },
+              { value: "helix", label: "Helical beam" },
+            ]} onChange={(value) => setBeam(beam.id, { style: value })} />
+            <Vec3Input label="Origin" value={beam.origin} range={1} onChange={(origin) => setBeam(beam.id, { origin })} />
+            <Range label="Azimuth" value={beam.azimuth} min={-180} max={180} step={1} onChange={(value) => setBeam(beam.id, { azimuth: value })} hint="Horizontal angle around the scene." />
+            <Range label="Elevation" value={beam.elevation} min={-89} max={89} step={1} onChange={(value) => setBeam(beam.id, { elevation: value })} hint="Vertical angle above or below the horizon." />
+            <Range label="Length" value={beam.length} min={0.05} max={8} step={0.01} onChange={(value) => setBeam(beam.id, { length: value })} />
+            <Range label="Width" value={beam.width} min={0.002} max={0.5} step={0.002} onChange={(value) => setBeam(beam.id, { width: value })} />
+            <Range label="Spread" value={beam.spread} min={0} max={3} step={0.01} onChange={(value) => setBeam(beam.id, { spread: value })} />
+            {beam.style === "arc" && <Range label="Bend" value={beam.bend} min={-2} max={2} step={0.01} onChange={(value) => setBeam(beam.id, { bend: value })} />}
+            {beam.style === "helix" && <Range label="Twist turns" value={beam.twist} min={-8} max={8} step={0.05} onChange={(value) => setBeam(beam.id, { twist: value })} />}
+            <Range label="Intensity" value={beam.intensity} min={0} max={2} step={0.01} onChange={(value) => setBeam(beam.id, { intensity: value })} />
+            <Range label="Palette position" value={beam.colorPosition} min={0} max={1} step={0.01} onChange={(value) => setBeam(beam.id, { colorPosition: value })} hint="Selects a position in the shared Look palette." />
+            <Range label="Fade in" value={beam.fadeIn} min={0.01} max={1} step={0.01} onChange={(value) => setBeam(beam.id, { fadeIn: value })} />
+            <Range label="Fade out" value={beam.fadeOut} min={0.01} max={1} step={0.01} onChange={(value) => setBeam(beam.id, { fadeOut: value })} />
+            <Range label="Motion speed" value={beam.speed} min={0} max={8} step={0.01} onChange={(value) => setBeam(beam.id, { speed: value })} />
+            <Range label="Shape motion" value={beam.motion} min={0} max={1} step={0.01} onChange={(value) => setBeam(beam.id, { motion: value })} />
+            <Range label="Seed" value={beam.seed} min={0} max={999} step={1} onChange={(value) => setBeam(beam.id, { seed: value })} />
+            <div className="s3-actions">
+              <button type="button" className="s3-btn" disabled={project.beams.length >= MAX_LIGHT_BEAMS} onClick={() => duplicateBeam(beam)}>Duplicate</button>
+              <button type="button" className="s3-btn danger" onClick={() => upd((p) => ({ ...p, beams: p.beams.filter((item) => item.id !== beam.id) }))}>Remove</button>
+            </div>
+          </details>
+        ))}
+        {!project.beams.length && <p className="s3-hint">No beams yet. Add one above, then duplicate or tune each beam independently.</p>}
+      </Section>
+    </>
+  );
 
   /* panels */
   const presetGroups = [...new Set(GENERATORS.map((g) => g.tag))];
@@ -459,25 +646,67 @@ export default function Studio3D({ active, modeSwitch, initialProject }: { activ
       </Section>
     </>
   );
-  const body = { presets, shape, interact, text: textPanel, motion, look, camera, timeline, export: exportPanel }[tab];
+  const body = { presets, shape, dust: beamPanel, interact, text: textPanel, motion, look, camera, timeline, export: exportPanel }[tab];
 
   return (
     <div className="studio s3d" data-active={active}>
       <header className="s3-top">
         <div className="s3-brand"><b>Particle Studio</b><span>3D engine</span></div>
         {modeSwitch}
-        <div className="s3-top-actions"><button type="button" className="s3-btn" onClick={explode}>Burst</button><button type="button" className="s3-btn" onClick={() => setDockOpen((o) => !o)} aria-expanded={dockOpen}>{dockOpen ? "Hide panel" : "Panel"}</button></div>
+        <div className="s3-top-actions"><button type="button" className="s3-btn" onClick={explode}>Burst</button></div>
       </header>
-      <div className={"s3-main" + (dockOpen ? "" : " closed")}>
+      <div className="s3-main" ref={workspaceRef} style={{ "--s3-dock-frac": dockFrac } as CSSProperties}>
         <div className="s3-view" ref={hostRef}>
           <canvas ref={canvasRef} aria-label="3D particle preview" />
           <div className="s3-hud"><b>{def.name}</b><span>{stats.n.toLocaleString()} particles · {stats.fps} fps{stats.active < 0.99 ? ` · adaptive ${Math.round(stats.active * 100)}%` : ""}</span></div>
           {busy && <div className="s3-busy">Generating…</div>}
           {notice && <div className="s3-notice" role="status">{notice}</div>}
         </div>
-        <aside className="s3-dock">
-          <nav className="s3-tabs" role="tablist">{TABS.map((t) => <button key={t.id} role="tab" aria-selected={tab === t.id} className={tab === t.id ? "on" : ""} onClick={() => setTab(t.id)} type="button">{t.label}</button>)}</nav>
-          <div className="s3-scroll">{body}</div>
+        <aside className={"s3-dock" + (collapsed ? " collapsed" : "")} ref={dockRef}>
+          {mobile ? (
+            <>
+              <div
+                className="s3-dock-bar"
+                role="group"
+                aria-label="3D controls panel — drag to resize, tap to fold"
+                tabIndex={0}
+                onPointerDown={onBarPointerDown}
+                onPointerMove={onBarPointerMove}
+                onPointerUp={(event) => finishDockDrag(event, false)}
+                onPointerCancel={(event) => finishDockDrag(event, true)}
+                onKeyDown={onBarKeyDown}
+              >
+                <span className="s3-dock-bar-label"><span aria-hidden="true">◉</span>{def.name}</span>
+                <span className="s3-dock-grip" aria-hidden="true" />
+                <span className="s3-dock-bar-actions">
+                  <button type="button" className="s3-bar-icon" aria-label={collapsed ? "Show 3D controls" : "Hide 3D controls"} onClick={() => setCollapsed((value) => !value)}>{collapsed ? "⌃" : "⌄"}</button>
+                </span>
+              </div>
+              <div className="s3-dock-body" id="s3-panel-body" aria-hidden={collapsed}>
+                <nav className="s3-tabs" role="tablist">{TABS.map((t) => <button key={t.id} role="tab" aria-selected={tab === t.id} className={tab === t.id ? "on" : ""} onClick={() => setTab(t.id)} type="button">{t.label}</button>)}</nav>
+                <div className="s3-scroll">{body}</div>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="s3-dock-head">
+                <div><span>PARTICLE STUDIO</span><b>Control your particles</b></div>
+                <button type="button" className="s3-x" aria-label={collapsed ? "Expand controls" : "Collapse controls"} onClick={() => setCollapsed((value) => !value)}>{collapsed ? "‹" : "›"}</button>
+              </div>
+              {collapsed ? (
+                <button type="button" className="s3-dock-summary" onClick={() => setCollapsed(false)}>
+                  <span className="s3-summary-icon">◉</span>
+                  <span><b>Particle controls</b><small>{def.name} · click to customize</small></span>
+                  <span className="s3-summary-arrow">‹</span>
+                </button>
+              ) : (
+                <div className="s3-dock-body">
+                  <nav className="s3-tabs" role="tablist">{TABS.map((t) => <button key={t.id} role="tab" aria-selected={tab === t.id} className={tab === t.id ? "on" : ""} onClick={() => setTab(t.id)} type="button">{t.label}</button>)}</nav>
+                  <div className="s3-scroll">{body}</div>
+                </div>
+              )}
+            </>
+          )}
         </aside>
       </div>
     </div>

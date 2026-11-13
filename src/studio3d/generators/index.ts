@@ -6,8 +6,9 @@ import { SHAPES2 } from "./shapes2";
 import { SHAPES3 } from "./shapes3";
 import { SHAPES4 } from "./shapes4";
 import { SHAPES5 } from "./shapes5";
+import { DUST_GENERATORS } from "./dust";
 
-export const GENERATORS: GeneratorDef[] = [...SHAPES1, ...SHAPES2, ...SHAPES3, ...SHAPES4, ...SHAPES5];
+export const GENERATORS: GeneratorDef[] = [...SHAPES1, ...SHAPES2, ...SHAPES3, ...DUST_GENERATORS, ...SHAPES4, ...SHAPES5];
 const BY_ID = new Map<string, GeneratorDef>(GENERATORS.map((g) => [g.id, g]));
 export const GENERATOR_IDS = GENERATORS.map((g) => g.id) as GeneratorId[];
 export const isGeneratorId = (id: unknown): id is GeneratorId => typeof id === "string" && BY_ID.has(id);

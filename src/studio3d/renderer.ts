@@ -1,12 +1,13 @@
 /** WebGL2 particle renderer: instanced-free point sprites, HDR scene target, dual-Kawase bloom, trails, tone mapping. */
-import type { Look, PaletteStop, ParticleShape } from "./types";
+import type { LightBeam, Look, PaletteStop, ParticleShape } from "./types";
 import type { OrbitCamera } from "./camera";
 import { paletteBytes, parseColor } from "./palette";
+import { createLightBeamFrame, updateLightBeamFrame } from "./lightBeams";
 
 export interface LayerLook { palette: PaletteStop[] | null; sizeMul: number; opacityMul: number }
 export interface RenderInput {
   n: number; pos: Float32Array; vel: Float32Array; nrm: Float32Array; t: Float32Array; size: Float32Array; alpha: Float32Array; phase: Float32Array; layer: Uint8Array;
-  attrVersion: number; time: number; camera: OrbitCamera; look: Look; layers: LayerLook[]; bloomLevel: number; focus: number; range: number;
+  attrVersion: number; time: number; camera: OrbitCamera; look: Look; layers: LayerLook[]; beams: LightBeam[]; bloomLevel: number; focus: number; range: number;
 }
 export interface RendererInfo { kind: "webgl2" | "canvas2d"; gpu: string; hdr: boolean; maxPoint: number }
 export interface Renderer {
@@ -23,6 +24,8 @@ precision highp float;
 layout(location=0) in vec3 aPos; layout(location=1) in vec3 aVel; layout(location=2) in vec3 aNrm; layout(location=3) in vec4 aMisc;
 uniform mat4 uView, uProj; uniform float uPx, uOrtho, uSize, uSizeVar, uSizeAtt, uTime, uOpacity, uEmission, uNorm, uEdge, uDepthFade, uDepthColor, uVelColor, uStretch, uLight, uSpin, uFocus, uRange;
 uniform vec3 uLightDir; uniform vec4 uLayer[4]; uniform sampler2D uPalette;
+uniform int uBeamCount;
+uniform vec4 uBeamOriginLen[20], uBeamDirWidth[20], uBeamProfile[20], uBeamAnim[20], uBeamTint[20], uBeamSideA[20], uBeamSideB[20];
 out vec4 vCol; out vec2 vDir; out float vStretch;
 float h11(float p){ return fract(sin(p*127.1)*43758.5453); }
 void main(){
@@ -45,6 +48,39 @@ void main(){
   float t = clamp(aMisc.x + uDepthColor*(dz-0.5) + uVelColor*clamp(speed*0.25,0.0,1.0), 0.0, 1.0);
   vec3 col = texture(uPalette, vec2(t, (layer+0.5)/4.0)).rgb;
   float a = uOpacity*uNorm*aMisc.z*uLayer[li].y*fade*b*energy;
+  float beamEnergy = 0.0; vec3 beamColor = vec3(0.0);
+  for(int i=0;i<20;i++){
+    if(i>=uBeamCount) break;
+    vec4 originLen=uBeamOriginLen[i], dirWidth=uBeamDirWidth[i], profile=uBeamProfile[i], anim=uBeamAnim[i], tint=uBeamTint[i];
+    vec3 beamDir=dirWidth.xyz; vec3 rel=aPos-originLen.xyz;
+    float alongDistance=dot(rel,beamDir), u=alongDistance/originLen.w;
+    if(u<0.0||u>1.0) continue;
+    vec3 lateral=rel-beamDir*alongDistance;
+    float sa=dot(lateral,uBeamSideA[i].xyz), sb=dot(lateral,uBeamSideB[i].xyz);
+    float bendA=0.0, bendB=0.0;
+    if(profile.x>1.5&&profile.x<2.5){
+      bendA=profile.z*sin(3.14159265*u)+profile.z*0.22*tint.y*sin(u*7.5+anim.y+uTime*anim.x*0.31);
+    }else if(profile.x>2.5){
+      float turn=u*6.2831853*max(0.25,abs(tint.z))+anim.y+uTime*anim.x*0.31;
+      float helixRadius=dirWidth.w*(0.8+profile.y*0.12);
+      bendA=cos(turn)*helixRadius; bendB=sin(turn)*helixRadius;
+    }
+    float widen=profile.x>0.5&&profile.x<1.5?profile.y:profile.y*0.12;
+    float swell=1.0+0.38*tint.y*sin(u*4.2+anim.y+uTime*anim.x*0.33);
+    float radius=dirWidth.w*(1.0+widen*u)*swell;
+    float q=length(vec2(sa-bendA,sb-bendB))/max(0.001,radius);
+    if(q>7.4) continue;
+    float q2=q*q;
+    float beamProfile=0.8*exp(-q2)+0.28*exp(-q2/7.84);
+    float alongFade=smoothstep(0.0,anim.z,u)*(1.0-smoothstep(1.0-anim.w,1.0,u));
+    float wave=0.84+0.16*sin(u*9.0-uTime*anim.x*0.5+anim.y)+0.07*sin(u*23.0+q*0.6+uTime*anim.x*1.6+anim.y);
+    float reflectivity=hasN>0.5?0.3+0.7*max(dot(normalize(aNrm),-beamDir),0.0):0.25+0.75*h11(ph*113.1);
+    float glint=pow(max(0.0,sin(uTime*(0.6+anim.x)+ph*6.2832)),8.0);
+    float reflected=beamProfile*alongFade*max(0.0,wave)*profile.w*reflectivity*(0.82+0.18*glint);
+    beamEnergy+=reflected;
+    beamColor+=texture(uPalette,vec2(tint.x,(layer+0.5)/4.0)).rgb*reflected;
+  }
+  if(beamEnergy>0.0001) col+=beamColor/max(beamEnergy,0.0001)*min(2.5,beamEnergy)*1.25;
   vCol = vec4(col*uEmission, a); vDir = dir; vStretch = stretch;
 }`;
 export const FRAG = `#version 300 es
@@ -93,6 +129,7 @@ type Prog = { p: WebGLProgram; u: Record<string, WebGLUniformLocation | null> };
 export class GLRenderer implements Renderer {
   info: RendererInfo = { kind: "webgl2", gpu: "", hdr: false, maxPoint: 64 };
   renderMs = 0;
+  private beamFrame = createLightBeamFrame();
   private gl!: WebGL2RenderingContext; private w = 1; private h = 1; private lost = false;
   private progs: Record<string, Prog> = {}; private vao!: WebGLVertexArrayObject; private bPos!: WebGLBuffer; private bVel!: WebGLBuffer; private bNrm!: WebGLBuffer; private bMisc!: WebGLBuffer; private palTex!: WebGLTexture; private emptyVao!: WebGLVertexArrayObject;
   private cap = 0; private seenAttr = -1; private seenN = -1; private misc = new Float32Array(0); private nrm8 = new Int8Array(0); private scene: RT[] = []; private chain: RT[] = []; private sceneIdx = 0; private palKey = ""; private fmtHdr = false; private onLost = (e: Event) => { e.preventDefault(); this.lost = true; }; private onRestored = () => { this.initGL(); this.lost = false; };
@@ -112,7 +149,7 @@ export class GLRenderer implements Renderer {
     this.info.maxPoint = (gl.getParameter(gl.ALIASED_POINT_SIZE_RANGE) as Float32Array)[1];
     this.fmtHdr = !!(gl.getExtension("EXT_color_buffer_float") || gl.getExtension("EXT_color_buffer_half_float"));
     gl.getExtension("OES_texture_float_linear");
-    this.progs.pts = this.prog(VERT, FRAG, ["uView", "uProj", "uPx", "uOrtho", "uSize", "uSizeVar", "uSizeAtt", "uTime", "uOpacity", "uEmission", "uNorm", "uEdge", "uDepthFade", "uDepthColor", "uVelColor", "uStretch", "uLight", "uSpin", "uFocus", "uRange", "uLightDir", "uLayer", "uPalette", "uShape", "uSoft"]);
+    this.progs.pts = this.prog(VERT, FRAG, ["uView", "uProj", "uPx", "uOrtho", "uSize", "uSizeVar", "uSizeAtt", "uTime", "uOpacity", "uEmission", "uNorm", "uEdge", "uDepthFade", "uDepthColor", "uVelColor", "uStretch", "uLight", "uSpin", "uFocus", "uRange", "uLightDir", "uLayer", "uPalette", "uShape", "uSoft", "uBeamCount", "uBeamOriginLen", "uBeamDirWidth", "uBeamProfile", "uBeamAnim", "uBeamTint", "uBeamSideA", "uBeamSideB"]);
     this.progs.down = this.prog(FS_VERT, DOWN, ["t", "px", "off"]); this.progs.up = this.prog(FS_VERT, UP, ["t", "px", "off"]); this.progs.fade = this.prog(FS_VERT, FADE, ["t", "k"]);
     this.progs.comp = this.prog(FS_VERT, COMPOSITE, ["scene", "bloom", "glow", "exposure", "vignette", "grain", "alphaMode", "transparent", "hasBloom", "seed", "bg"]);
     this.vao = gl.createVertexArray()!; this.emptyVao = gl.createVertexArray()!;
@@ -190,6 +227,7 @@ export class GLRenderer implements Renderer {
     // particles
     cam.updateMatrices(this.w / this.h);
     const P = this.progs.pts, U = P.u;
+    updateLightBeamFrame(inp.beams, inp.time, this.beamFrame);
     gl.useProgram(P.p); gl.bindVertexArray(this.vao); gl.enable(gl.BLEND);
     if (look.blend === "additive") gl.blendFunc(gl.ONE, gl.ONE); else if (look.blend === "screen") gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_COLOR); else gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
     gl.uniformMatrix4fv(U.uView, false, cam.view); gl.uniformMatrix4fv(U.uProj, false, cam.proj);
@@ -202,6 +240,10 @@ export class GLRenderer implements Renderer {
     gl.uniform3f(U.uLightDir, Math.cos(el) * Math.sin(az), Math.sin(el), Math.cos(el) * Math.cos(az));
     const lay = new Float32Array(16); for (let i = 0; i < 4; i++) { lay[i * 4] = inp.layers[i]?.sizeMul ?? 1; lay[i * 4 + 1] = inp.layers[i]?.opacityMul ?? 1; }
     gl.uniform4fv(U.uLayer, lay); gl.uniform1i(U.uShape, SHAPES[look.shape] ?? 0); gl.uniform1f(U.uSoft, look.softness);
+    gl.uniform1i(U.uBeamCount, this.beamFrame.count);
+    gl.uniform4fv(U.uBeamOriginLen, this.beamFrame.originLength); gl.uniform4fv(U.uBeamDirWidth, this.beamFrame.directionWidth);
+    gl.uniform4fv(U.uBeamProfile, this.beamFrame.profile); gl.uniform4fv(U.uBeamAnim, this.beamFrame.animation);
+    gl.uniform4fv(U.uBeamTint, this.beamFrame.tint); gl.uniform4fv(U.uBeamSideA, this.beamFrame.sideA); gl.uniform4fv(U.uBeamSideB, this.beamFrame.sideB);
     gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, this.palTex); gl.uniform1i(U.uPalette, 1);
     gl.drawArrays(gl.POINTS, 0, n);
     gl.disable(gl.BLEND);

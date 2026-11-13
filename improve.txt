@@ -1,499 +1,687 @@
-# MASTER DEVELOPMENT PROMPT — PARTICLE STUDIO ADVANCED 3D & PROCEDURAL PARTICLE ENGINE
+# MASTER DEVELOPMENT PROMPT: Transform ParticaleStudio SVG Import into a Universal SVG-to-3D Particle Geometry Engine
 
-You are a senior graphics engineer, WebGL developer, computational geometry specialist, and creative software architect.
+## PROJECT OBJECTIVE
 
-Your task is to transform the existing Particle Studio project into a professional, advanced procedural particle creation platform.
+Upgrade the existing SVG Shape Import and 3D Particle Formation system in ParticaleStudio into a professional, advanced, procedural SVG-to-3D geometry generation engine.
 
-Repository: `littlecoder21/particalestudio`
+This is an architectural upgrade to the existing application, NOT a separate application and NOT a replacement for the existing particle engine.
 
-The goal is to create a powerful particle system capable of generating complex 2D and genuine 3D particle structures, volumetric formations, fluid-like surfaces, organic sculptures, mathematical geometry, and interactive particle simulations.
+The goal is to allow users to import almost any valid SVG and transform it into many different types of editable, customizable, high-quality 3D particle formations.
 
-IMPORTANT: This is an upgrade to an existing application, NOT a replacement project.
+A single SVG should be capable of generating dozens of different 3D structures using different geometry interpretation rules.
 
-## 1. FIRST: AUDIT THE EXISTING PROJECT
+Preserve all existing functionality, interfaces, project compatibility, particle simulation, generators, animation, interactions and export systems.
 
-Before changing anything:
+---
 
-- Inspect the complete repository structure.
-- Review particleEngine.ts, generators.ts, App.tsx, settings models, rendering utilities, SVG import, shape designer, shader system, preset system, JSON loader, and export functionality.
-- Understand how existing particle positions, physics, animation, interactions, and presets work.
-- Identify reusable components and architectural limitations.
-- Identify existing features that could break during the upgrade.
-- Create an implementation plan based on the actual code.
+# 1. FIRST: AUDIT THE EXISTING IMPLEMENTATION
 
-Do not assume the current implementation is identical to a typical particle library.
+Before writing code, inspect the entire existing SVG import and 3D particle generation architecture.
 
-Preserve existing features and saved projects.
+Important existing architecture includes:
 
-## 2. CREATE A REAL 3D PARTICLE ENGINE
+- `src/studio3d/types.ts`
+- `src/studio3d/simulation.ts`
+- `src/studio3d/generators/index.ts`
+- `src/studio3d/camera.ts`
+- `src/studio3d/renderer.ts`
+- Existing SVG import and shape parsing modules.
+- Existing Shape Import UI.
+- Existing Formation generation and normalization.
+- Existing particle rendering and interaction systems.
+- Existing JSON project serialization.
 
-Introduce a dedicated 3D particle simulation and rendering architecture.
+Identify:
 
-Every 3D particle must support:
+1. How SVG files are currently parsed.
+2. How paths are sampled.
+3. How 2D shapes are converted into particles.
+4. How Formation objects are constructed.
+5. How generated positions, normals, sizes and particle attributes are stored.
+6. How imported formations connect to the 3D simulation.
+7. How particle counts and density are managed.
+8. How imported shapes are saved and loaded.
+9. What prevents the current importer from generating complex 3D objects.
+10. Which existing systems can be reused.
 
-- Position: x, y, z.
-- Velocity: vx, vy, vz.
-- Acceleration: ax, ay, az.
-- Mass and optional force response.
-- Particle size and depth.
-- Rotation and orientation.
-- Color and opacity.
-- Lifetime and age.
-- Individual or shared animation phase.
-- Optional surface attachment and formation identity.
+Do not rewrite working modules unnecessarily.
 
-Implement a genuine 3D camera system:
+Create a clear implementation plan based on the real repository.
 
-- Perspective camera.
-- Orthographic camera.
-- Camera position and target.
-- Camera rotation.
-- Field of view.
-- Near and far clipping.
-- Zoom.
-- Orbit controls.
-- Pan and dolly.
-- Optional auto-rotation.
-- Depth sorting where required.
+# 2. UNIVERSAL SVG GEOMETRY PARSER
 
-The 3D engine must calculate and render actual spatial geometry. Do not fake depth by scaling 2D coordinates.
+Build a robust SVG geometry parser that understands:
 
-## 3. BUILD 20 EDITABLE 3D PRESETS
-
-Implement these 20 presets as procedural geometry generators:
-
-1. Particle Sphere
-2. Particle Torus
-3. DNA Helix
-4. Particle Galaxy
-5. Möbius Structure
-6. Particle Cube
-7. Klein Bottle
-8. Mandelbulb
-9. Wave Surface
-10. Particle Flower
-11. Volumetric Smoke
-12. Particle Fabric
-13. Wormhole
-14. Energy Vortex
-15. Crystal Formation
-16. Neural Network
-17. Atomic Structure
-18. Particle Knot
-19. Particle Explosion
-20. Fluid Sculpture
-
-Every preset must have its own actual mathematical or geometric generation method.
-
-Requirements:
-
-- Use parametric equations where appropriate.
-- Use signed distance fields for suitable volumetric shapes.
-- Use surface sampling for continuous surfaces.
-- Use volume sampling for solid formations.
-- Use procedural noise for organic structures.
-- Use fractal iteration for fractal formations.
-- Use spatial sampling for neural and network structures.
-- Use particle distributions that avoid visibly uneven clustering unless intentional.
-
-Every preset must be editable after creation.
-
-Do not implement these as 20 static images, screenshots, or fixed particle coordinates.
-
-## 4. BUILD A POWERFUL GEOMETRY SAMPLING ENGINE
-
-Create a reusable geometry sampling system that can convert different types of geometry into particle formations.
+- path
+- rect
+- circle
+- ellipse
+- polygon
+- polyline
+- line
+- g
+- defs
+- use
+- symbol
+- clipPath
+- mask
+- linearGradient
+- radialGradient
+- pattern
+- transform
+- fill
+- stroke
+- stroke-width
+- opacity
+- fill-rule
+- stroke-linecap
+- stroke-linejoin
 
 Support:
 
-- Parametric surfaces.
-- Mathematical equations.
-- 3D primitives.
-- Custom procedural meshes.
-- Signed distance fields.
-- SVG paths and shapes.
-- Imported 3D models where feasible.
-- Image-to-particle sampling.
-- Text-to-particle formations.
-- Existing Shape Designer geometry.
+- SVG viewBox normalization.
+- Nested groups.
+- Nested transformations.
+- Multiple paths.
+- Multiple independent objects.
+- Cubic Bézier curves.
+- Quadratic Bézier curves.
+- Arc commands.
+- Closed and open paths.
+- Holes and compound paths.
+- Even-odd and nonzero fill rules.
+- SVG coordinate transformations.
 
-Sampling modes:
+Convert supported geometry into a normalized internal representation.
 
-- Uniform surface sampling.
-- Random surface sampling.
-- Volume sampling.
-- Edge sampling.
-- Vertex sampling.
-- Density-weighted sampling.
-- Poisson disk sampling.
-- Blue-noise distribution.
-- Gradient-weighted sampling.
+Important:
+Use a proven SVG path parser or robust existing parser rather than implementing incomplete SVG path parsing from scratch.
 
-Expose sampling density, randomness, spacing, particle count, and distribution controls.
+Handle unsupported features gracefully and report them to the user.
 
-Create a common geometry interface so new generators can be added without rewriting the simulation engine.
+# 3. ADVANCED SVG-TO-3D GENERATION MODES
 
-## 5. ADVANCED PARTICLE FABRIC SYSTEM
+Implement a modular geometry rule engine.
 
-A major priority is recreating the flowing translucent particle fabric from the supplied visual reference.
+Every generation mode must work independently and expose its own controls.
 
-Build a dedicated geometry-driven particle fabric generator.
+## A. EXTRUSION ENGINE
 
-It must support:
+Convert SVG silhouettes into volumetric 3D objects.
 
-- Parametric ribbon surfaces.
-- Multiple folded surfaces.
+Controls:
+
+- Extrusion depth.
+- Front and back thickness.
+- Bevel depth.
+- Bevel segments.
+- Sidewall density.
+- Front surface density.
+- Back surface density.
+- Depth distribution.
+- Particle spacing.
+- Edge particle density.
+- Surface normal generation.
+
+Generate particles on:
+
+- Front surface.
+- Back surface.
+- Sidewalls.
+- Beveled edges.
+- Entire solid volume.
+
+Preserve holes and compound path geometry.
+
+## B. VOLUME FILL ENGINE
+
+Fill SVG silhouettes with 3D particle distributions.
+
+Support:
+
+- Uniform volume filling.
+- Surface-biased filling.
+- Center-biased density.
+- Edge-biased density.
+- Radial density.
+- Gradient density.
+- Noise-based density.
+- Layered volume.
+- Organic volume distribution.
+
+Use robust point-in-shape tests and efficient sampling.
+
+Avoid placing particles outside the actual SVG silhouette.
+
+## C. HEIGHTMAP / DISPLACEMENT ENGINE
+
+Convert SVG visual information into 3D depth.
+
+Use:
+
+- Fill brightness.
+- Alpha.
+- Color intensity.
+- Gradients.
+- Luminance.
+- Masks.
+- Custom depth maps.
+
+Controls:
+
+- Height amplitude.
+- Depth inversion.
+- Height contrast.
+- Smoothing.
+- Displacement frequency.
+- Surface resolution.
+- Noise displacement.
+- Direction and axis.
+
+Allow flat SVG shapes to become complex 3D terrain-like structures.
+
+## D. PATH SWEEP ENGINE
+
+Convert SVG paths into 3D structures.
+
+Generate:
+
+- Tubes.
+- Ribbons.
 - Twisted ribbons.
-- Organic cloth-like deformation.
-- Variable surface width.
-- Wave deformation.
-- Curvature control.
-- Fold frequency and intensity.
-- Surface thickness.
-- Multiple overlapping layers.
-- Particle density variation.
-- Localized turbulence.
-- Animated surface displacement.
+- Spiral structures.
+- Organic branches.
+- Helix structures.
+- Variable-width curves.
+- Multi-path sweeps.
 
-The particles must follow the surface and create a continuous, fine-grained appearance.
+Controls:
 
-The fabric should be able to stretch, twist, fold, undulate, and evolve over time.
+- Tube radius.
+- Ribbon width.
+- Twist amount.
+- Twist frequency.
+- Sweep direction.
+- Cross-section shape.
+- Taper.
+- Curvature.
+- Particle density.
+- Segments.
 
-Add a mode for particles to detach from the surface and return to it.
+Use parallel-transport frames or another stable frame construction method to prevent twisting artifacts along curved paths.
 
-Do not simply use random particles with a smoke effect to imitate this appearance.
+## E. CONTOUR LAYER ENGINE
 
-## 6. ADVANCED 3D PHYSICS AND MOTION
+Generate 3D structures using multiple SVG contour layers.
 
-Implement a modular force-field system:
+Features:
 
-- Gravity.
-- Attractors.
-- Repellers.
-- Vortex fields.
-- Curl noise.
-- Turbulence.
-- Magnetic fields.
-- Fluid-like forces.
-- Spring forces.
-- Cohesion.
-- Separation.
-- Alignment.
-- Collision.
-- Surface attraction.
-- Directional fields.
-- Radial fields.
-- Wave forces.
-- Custom force fields.
+- Depth-separated contours.
+- Scale progression.
+- Rotation progression.
+- Offset progression.
+- Layer interpolation.
+- Organic transitions.
+- Variable layer spacing.
+- Layer blending.
+- Particle density per layer.
 
-Support force blending and configurable influence radius.
+Support both inward and outward contour generation.
 
-Implement physically stable simulation using a fixed timestep and frame-rate-independent integration.
+## F. SURFACE DEFORMATION ENGINE
 
-Add substeps where required.
+Allow SVG-derived geometry to be transformed into complex 3D formations.
 
-Use a spatial acceleration structure such as a 3D spatial hash, grid, or octree for proximity operations and collision queries.
+Include:
 
-Avoid checking every particle against every other particle when spatial acceleration is available.
+- Twist.
+- Bend.
+- Taper.
+- Inflate.
+- Deflate.
+- Wave.
+- Ripple.
+- Fold.
+- Spiral.
+- Spherical projection.
+- Cylindrical projection.
+- Toroidal projection.
+- Noise displacement.
+- Radial distortion.
 
-## 7. ADVANCED PARTICLE BEHAVIOR BUILDER
+All transformations must be stackable.
 
-Allow users to combine multiple behaviors into one particle system.
+Users must be able to combine several transformations in a defined order.
+
+# 4. SVG-BASED ADVANCED 3D CONSTRUCTION
+
+Create additional geometry construction methods.
+
+### Revolve / Lathe
+
+Revolve an SVG profile around X, Y or Z axes.
+
+Support full and partial revolutions.
+
+### Loft
+
+Generate 3D surfaces between multiple SVG profiles.
+
+Allow different profile scales, rotations, offsets and interpolation.
+
+### Morphological Geometry
+
+Use SVG silhouettes as masks for:
+
+- Expansion.
+- Contraction.
+- Edge extraction.
+- Outline generation.
+- Offset contours.
+- Distance-field-based geometry.
+
+### Symmetry Engine
+
+Support:
+
+- Horizontal symmetry.
+- Vertical symmetry.
+- Bilateral symmetry.
+- Radial symmetry.
+- Rotational symmetry.
+- Mirroring.
+- Repeated geometry.
+
+# 5. ADVANCED PARTICLE DISTRIBUTION ENGINE
+
+This is essential.
+
+Do not simply distribute particles randomly.
+
+Implement multiple high-quality sampling methods:
+
+1. Uniform random sampling.
+2. Poisson disk sampling.
+3. Blue-noise sampling.
+4. Stratified sampling.
+5. Surface sampling.
+6. Volume sampling.
+7. Edge sampling.
+8. Curvature-weighted sampling.
+9. Density-map sampling.
+10. Adaptive sampling.
+
+Add controls for:
+
+- Particle count.
+- Minimum spacing.
+- Maximum spacing.
+- Density.
+- Distribution randomness.
+- Edge density.
+- Curvature influence.
+- Surface bias.
+- Volume bias.
+- Seed.
+- Distribution quality.
+
+Maintain deterministic generation with the same seed and settings.
+
+Use spatial acceleration where necessary.
+
+# 6. ADVANCED SVG GEOMETRY COMBINATION
+
+Allow users to combine multiple SVG objects and geometry rules.
+
+Implement:
+
+- Union.
+- Intersection.
+- Subtraction.
+- Difference.
+- Layer composition.
+- Shape merging.
+- Shape masking.
+- Multiple extrusion objects.
+- Independent geometry transformations.
+
+Where exact geometric Boolean operations are not practical, use robust 2D or 3D signed-distance-field approaches.
+
+Avoid approximating Boolean operations by merely overlapping particles.
+
+# 7. PARTICLE ATTRIBUTE GENERATION
+
+Every generated formation must correctly populate the existing Formation structure.
+
+Respect:
+
+- pos
+- nrm
+- t
+- size
+- alpha
+- phase
+- weight
+- layer
+- radius
+
+Generate meaningful attributes:
+
+- Accurate surface normals.
+- Particle size variation.
+- Alpha variation.
+- Density-based attributes.
+- Curvature-based attributes.
+- Depth-based attributes.
+- Surface identification.
+- Edge identification.
+- Stable particle identity where applicable.
+
+Do not break the existing Formation interface.
+
+Extend it only when absolutely necessary, with backward-compatible defaults.
+
+# 8. INTERACTIVE 3D SVG SHAPE EDITOR
+
+Upgrade the current Shape Import interface into a professional geometry editor.
+
+Provide separate panels:
+
+### Source
+- SVG upload.
+- SVG preview.
+- Path selection.
+- Group selection.
+- Object visibility.
+- Path isolation.
+- Geometry selection.
+
+### Geometry
+- Generation mode.
+- Depth.
+- Extrusion.
+- Sweep.
+- Loft.
+- Revolve.
+- Volume fill.
+- Heightmap.
+
+### Distribution
+- Particle count.
+- Density.
+- Sampling method.
+- Spacing.
+- Randomness.
+- Seed.
+
+### Deformation
+- Twist.
+- Bend.
+- Inflate.
+- Wave.
+- Fold.
+- Noise.
+- Spherical projection.
+
+### Symmetry
+- Mirror.
+- Radial.
+- Axis selection.
+- Repetition count.
+
+### Appearance
+- Particle size.
+- Size variation.
+- Color.
+- Alpha.
+- Density visualization.
+- Normal visualization.
+
+### Performance
+- Preview quality.
+- Final generation quality.
+- Maximum particle count.
+- Adaptive sampling.
+- Regeneration controls.
+
+All controls must update the actual generated geometry.
+
+Do not create decorative or nonfunctional controls.
+
+# 9. REAL-TIME PREVIEW AND PERFORMANCE
+
+Implement a two-stage generation pipeline.
+
+### Preview Mode
+
+- Lower particle count.
+- Reduced sampling resolution.
+- Fast geometry updates.
+- Debounced regeneration.
+- Efficient caching.
+
+### Final Mode
+
+- Full particle count.
+- High-quality sampling.
+- Accurate normals.
+- Deterministic output.
+- Full attribute generation.
+
+Performance requirements:
+
+- Avoid unnecessary allocations.
+- Reuse typed arrays.
+- Use workers for expensive geometry generation where appropriate.
+- Avoid blocking the main thread.
+- Cache parsed SVG geometry.
+- Cache reusable sampling data.
+- Use spatial acceleration.
+- Avoid regenerating geometry when only appearance settings change.
+
+Keep rendering and simulation architecture independent from geometry generation.
+
+# 10. GPU AND CPU ARCHITECTURE
+
+Integrate generated formations with the existing 3D rendering engine.
+
+Do not confuse GPU rendering with GPU simulation.
+
+Keep geometry generation modular and CPU-compatible.
+
+Make generated formations suitable for the existing and future GPU simulation backend.
+
+Avoid introducing multiple unnecessary WebGL contexts.
+
+Reuse existing rendering infrastructure.
+
+# 11. MORPHING AND ANIMATION COMPATIBILITY
+
+Every generated SVG formation must work with existing particle morphing.
+
+Support:
+
+- SVG to SVG morphing.
+- SVG to procedural shape morphing.
+- Procedural shape to SVG morphing.
+- Different particle counts.
+- Morphing with stable particle correspondence.
+- Animated geometry deformation.
+- Timeline integration.
+
+Preserve the existing simulation's particle identity and morphing behavior.
+
+Do not cause sudden particle jumps when changing geometry.
+
+# 12. SVG IMPORT PRESETS
+
+Create useful geometry presets using the same engine.
 
 Examples:
 
-- Orbit + turbulence + attraction.
-- Curl flow + surface following.
-- Explosion + vortex + gravity.
-- Fluid deformation + particle cohesion.
-- Galaxy rotation + radial attraction.
-
-Each behavior should have:
+- Solid Extruded Logo.
+- Volumetric Heart.
+- Particle Typography.
+- Wireframe Dragon.
+- Organic Butterfly.
+- Layered Flower.
+- Spiral Ribbon.
+- Twisted Infinity.
+- 3D Brain Silhouette.
+- Crystal Emblem.
+- Particle Skull.
+- Volumetric Tree.
+- Contour Landscape.
+- Helical Symbol.
+- Geometric Sculpture.
+- 3D Particle Fabric.
+
+Presets must be actual configurations of the geometry engine, not separately hardcoded visual effects.
+
+# 13. JSON CONFIGURATION SYSTEM
+
+Create a versioned, portable JSON format for SVG-generated formations.
+
+Store:
+
+- Source SVG or embedded source reference.
+- Geometry generation mode.
+- Geometry parameters.
+- Sampling parameters.
+- Deformation stack.
+- Symmetry settings.
+- Particle attributes.
+- Seed.
+- Layer configuration.
+- Generation version.
+
+Requirements:
+
+- Strict validation.
+- Default values.
+- Parameter normalization.
+- Unknown-field handling.
+- Backward compatibility.
+- Useful error messages.
+- Reliable round-trip serialization.
+
+The JSON loader must reconstruct the same geometry from the same source and settings.
+
+Do not store only generated particle positions when procedural reconstruction is required.
+
+# 14. TESTING AND VALIDATION
+
+Create automated tests for:
+
+- SVG path parsing.
+- Bézier sampling.
+- Arc conversion.
+- Compound paths.
+- Holes.
+- Nested transforms.
+- Extrusion.
+- Volume filling.
+- Heightmaps.
+- Sweep geometry.
+- Contour generation.
+- Normals.
+- Density distributions.
+- Symmetry.
+- Boolean operations.
+- JSON serialization.
+- Deterministic seeds.
+- Formation compatibility.
+
+Test simple SVG files and complex real-world SVG files.
+
+Check for:
+
+- Particles outside silhouettes.
+- Incorrect normals.
+- Missing geometry.
+- Unexpected particle clustering.
+- Inverted faces.
+- NaN coordinates.
+- Memory leaks.
+- Excessive generation times.
+
+# 15. STRICT DEVELOPMENT RULES
+
+1. Preserve all existing application functionality.
+2. Do not rebuild the application from scratch.
+3. Do not replace the existing 3D particle simulation.
+4. Do not break existing generator IDs.
+5. Do not break existing JSON project files.
+6. Do not modify unrelated 2D particle functionality.
+7. Do not remove existing SVG import capabilities.
+8. Do not introduce unnecessary dependencies.
+9. Do not use placeholder implementations.
+10. Do not add controls that have no real implementation.
+11. Avoid duplicate geometry and rendering engines.
+12. Follow existing TypeScript conventions.
+13. Keep modules independent and maintainable.
+14. Maintain compatibility with existing WebGL2 and Canvas fallback.
+15. Preserve existing camera, interaction, animation and export systems.
 
-- Enable/disable.
-- Intensity.
-- Scale.
-- Speed.
-- Radius.
-- Direction.
-- Falloff.
-- Blend mode.
-- Animation controls.
-
-Allow behavior stacking without hardcoding a separate simulation for every combination.
-
-## 8. ADVANCED 3D RENDERING
-
-Create a professional rendering architecture.
+# 16. IMPLEMENTATION ORDER
 
-Prefer WebGL2 for GPU-accelerated rendering.
+Implement in independent, testable phases.
 
-Support:
+Phase 1: Audit current architecture and SVG importer.
 
-- GPU instanced particle rendering.
-- Point sprites.
-- Circular particle sprites.
-- Soft particle rendering.
-- Depth-aware transparency.
-- Additive blending.
-- Alpha blending.
-- Screen blending where appropriate.
-- Particle trails.
-- Volumetric-looking density.
-- Soft lighting.
-- Edge illumination.
-- Ambient lighting.
-- Bloom/glow.
-- Depth-based opacity.
-- Perspective particle sizing.
-- Optional motion blur.
+Phase 2: Build robust SVG parser and normalized geometry representation.
 
-Use GPU simulation with ping-pong textures or transform feedback when appropriate and compatible with the existing architecture.
+Phase 3: Implement extrusion and accurate 2D silhouette sampling.
 
-Do not create a separate WebGL context for every particle layer.
+Phase 4: Implement volume filling and advanced sampling algorithms.
 
-Use shared rendering resources and carefully manage GPU memory.
+Phase 5: Implement heightmap, contour and path sweep.
 
-Provide Canvas 2D fallback when WebGL2 is unavailable.
+Phase 6: Implement loft, revolve and geometry deformation.
 
-## 9. 3D INTERACTION SYSTEM
+Phase 7: Implement symmetry and geometry combination.
 
-Support mouse and touch interaction in 3D space.
-
-Implement:
-
-- 3D attract.
-- 3D repel.
-- Swirl.
-- Vortex.
-- Push and pull.
-- Surface distortion.
-- Local fluid displacement.
-- Velocity injection.
-- Particle scattering.
-- Particle gathering.
-- Multiple simultaneous interaction points where supported.
-
-Use camera raycasting or equivalent screen-to-world coordinate conversion.
-
-Support pointer velocity and pressure when available.
+Phase 8: Build the interactive geometry editor.
 
-Interactions should affect the actual 3D simulation, not just the displayed screen positions.
+Phase 9: Integrate JSON serialization, morphing and timeline.
 
-## 10. PARTICLE APPEARANCE AND MATERIAL SYSTEM
+Phase 10: Optimize performance and complete testing.
 
-Add professional appearance controls:
+After each phase:
 
-- Particle shape.
-- Particle size.
-- Size variation.
-- Opacity.
-- Color palette.
-- Depth color variation.
-- Density.
-- Glow.
-- Emission.
-- Light intensity.
-- Edge brightness.
-- Surface shading.
-- Noise texture.
-- Grain.
-- Softness.
+- Run TypeScript checks.
+- Run existing tests.
+- Run new geometry tests.
+- Verify existing particle presets.
+- Verify project save/load.
+- Verify rendering and morphing.
+- Fix regressions before proceeding.
 
-Support color gradients along geometry, particle age, depth, and velocity.
+# FINAL EXPECTED RESULT
 
-Make restrained, realistic lighting possible. Do not force excessive rainbow colors or unnecessary glow.
+ParticaleStudio should have a universal SVG-to-3D particle generation system.
 
-## 11. TIMELINE AND MORPHING
+Users should be able to import one SVG and transform it into:
 
-Add advanced animation capabilities:
+- Flat particle silhouettes.
+- Solid 3D objects.
+- Volumetric particle structures.
+- Extruded geometry.
+- 3D wireframes.
+- Tubes and ribbons.
+- Twisted structures.
+- Layered formations.
+- Lofted surfaces.
+- Revolved objects.
+- Heightmap sculptures.
+- Organic deformations.
+- Symmetrical formations.
+- Complex combined geometry.
 
-- Formation morphing.
-- Shape-to-shape transitions.
-- Geometry deformation.
-- Particle reassignment.
-- Explode and reform.
-- Looping.
-- Ping-pong animation.
-- Easing curves.
-- Animation timeline.
-- Keyframe support.
+The same generated formation must remain compatible with the existing 3D particle engine, animation, morphing, physics, interactions and export.
 
-Preserve particle identity where practical during morphing.
+The most important principle:
 
-Support transitions between different particle counts without visible sudden jumps.
+**SVG is not just an image to convert into particles. SVG must become a procedural geometry source capable of generating many different types of 3D particle structures.**
 
-## 12. EDITOR EXPERIENCE
-
-Add a dedicated 3D workspace with:
-
-- 3D viewport.
-- Camera controls.
-- Preset browser.
-- Geometry controls.
-- Particle controls.
-- Physics controls.
-- Force-field editor.
-- Appearance controls.
-- Animation timeline.
-- Layer management.
-- Performance information.
-
-Allow users to edit all 20 presets.
-
-Keep the existing 2D workflow intact.
-
-Avoid placing every new control into the existing interface at once. Organize advanced features into clear panels and collapsible sections.
-
-## 13. PERFORMANCE AND SCALABILITY
-
-Performance is a core requirement.
-
-Implement:
-
-- Fixed-timestep simulation.
-- Frame-rate-independent physics.
-- GPU-based simulation where appropriate.
-- Instanced rendering.
-- Spatial acceleration structures.
-- Object pooling.
-- Typed arrays for large particle datasets.
-- Efficient buffer updates.
-- Adaptive rendering quality.
-- Device pixel ratio management.
-- Particle count limits based on available resources.
-- Proper resource cleanup.
-- Pause and resume.
-- Visibility-aware rendering.
-
-Provide quality modes:
-
-- Low.
-- Medium.
-- High.
-- Ultra.
-
-Avoid allocating large temporary objects inside the animation loop.
-
-Avoid unnecessary GPU-to-CPU readbacks.
-
-Do not rebuild geometry every frame when only vertex positions need updating.
-
-Provide performance statistics: FPS, active particle count, simulation time, rendering time, and GPU capability where measurable.
-
-## 14. PROJECT FORMAT AND COMPATIBILITY
-
-Preserve the existing project JSON format wherever possible.
-
-Introduce versioned settings for new 3D functionality.
-
-Implement migrations for older project files.
-
-Ensure existing:
-
-- 2D particle presets.
-- SVG import.
-- Shape Designer.
-- SVG morphing.
-- Existing generators.
-- Interactions.
-- Shader effects.
-- JSON loading.
-- HTML/CSS/JS export.
-- Video export.
-
-Continue to work.
-
-Do not remove existing features or silently change their behavior.
-
-## 15. EXPORT SYSTEM
-
-Extend exports to support 3D particle creations.
-
-Support:
-
-- Standalone HTML.
-- JavaScript.
-- WebGL-based standalone output.
-- Configuration JSON.
-- High-resolution image export.
-- Video export.
-- Transparent-background export where technically possible.
-
-Exported animations must reproduce the actual particle simulation and appearance.
-
-Do not export only screenshots or static approximations of interactive effects.
-
-## 16. TESTING AND ACCEPTANCE CRITERIA
-
-The work is not complete merely because the interface contains new controls.
-
-Verify:
-
-1. All 20 presets generate real 3D particle geometry.
-2. Camera orbit, pan, zoom, and perspective work.
-3. Particles have actual depth and spatial positions.
-4. Geometry sampling works at different particle counts.
-5. Physics remains stable at different frame rates.
-6. Force fields work in three dimensions.
-7. Particle Fabric generates continuous folded structures.
-8. Morphing works between compatible and different geometries.
-9. Existing 2D presets continue to work.
-10. Existing project JSON files remain loadable.
-11. WebGL resources are correctly disposed.
-12. Exported results match the editor.
-13. Performance is measured rather than assumed.
-14. Fallback rendering works where supported.
-
-Create automated tests for geometry sampling, mathematical generators, settings migration, and simulation behavior.
-
-## IMPLEMENTATION STRATEGY
-
-Do not attempt a risky total rewrite in one step.
-
-Implement in phases:
-
-Phase 1: Architecture audit, compatibility plan, simulation/rendering separation, fixed timestep.
-
-Phase 2: Real 3D particle data model, camera, renderer, and first 3D primitives.
-
-Phase 3: Geometry sampling engine and all 20 procedural generators.
-
-Phase 4: Particle Fabric, volumetric formations, and advanced 3D motion.
-
-Phase 5: Force-field builder, interaction system, and particle morphing.
-
-Phase 6: Appearance, timeline, editor UI, and exports.
-
-Phase 7: Performance optimization, automated tests, and compatibility verification.
-
-After each phase, verify that existing functionality still works.
-
-## STRICT DEVELOPMENT RULES
-
-- Work with the actual repository architecture.
-- Preserve existing functionality.
-- Do not replace the existing application with a new demo.
-- Do not introduce fake 3D effects.
-- Do not create preset thumbnails as substitutes for working generators.
-- Do not leave placeholder controls.
-- Do not implement every feature as one enormous particleEngine.ts file.
-- Use clean TypeScript interfaces and modular systems.
-- Avoid unnecessary dependencies.
-- Reuse existing components where appropriate.
-- Do not delete working features to simplify implementation.
-- Do not claim a feature is complete without testing it.
-
-At the end of each phase, report:
-1. Files changed.
-2. New functionality.
-3. Existing functionality preserved.
-4. Tests performed and results.
-5. Known limitations.
-6. Recommended next phase.
-
-FINAL OBJECTIVE:
-
-Transform Particle Studio into an advanced creative particle platform where users can build, manipulate, animate, and export complex 2D and genuine 3D particle systems.
-
-The system should be capable of creating realistic particle fabric, volumetric smoke, fluid sculptures, mathematical surfaces, galaxies, fractals, organic structures, and interactive 3D particle formations through a unified, extensible procedural engine.
+Start with the repository audit. Report the existing implementation, identified limitations, proposed file changes and implementation phases before making changes. Then implement the phases incrementally without damaging existing functionality.
