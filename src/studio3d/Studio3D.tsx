@@ -15,6 +15,7 @@ import { PALETTE_PRESETS, samplePalette } from "./palette";
 import { clamp, EASING_NAMES, type EasingName } from "./math";
 import { GradientEditor, Range, Section, Segmented, Select, TextField, Toggle, Vec3Input } from "./controls3d";
 import { EXPORT_FORMATS, build3DProjectZip, exportSlug, generate3DCode, type CodeBundle, type ExportFormat } from "./codeExport";
+import exportRuntime from "virtual:studio3d-export-runtime";
 
 const STORE_KEY = "particle-studio-3d-project-v1";
 type Tab = "presets" | "shape" | "dust" | "interact" | "text" | "motion" | "look" | "camera" | "timeline" | "export";
@@ -123,6 +124,44 @@ export default function Studio3D({ active, modeSwitch, initialProject }: { activ
   const count = Math.min(project.count, q.maxCount);
   const activeLayer = project.layers.find((l) => l.id === project.activeLayer) ?? project.layers[0];
   const upd = useCallback((fn: (p: Project3D) => Project3D) => setProject((p) => fn(p)), []);
+  const createExportBundle = () => {
+    const current = projRef.current;
+    const camera = camRef.current;
+    const exportProject = { ...current, camera: camera?.toSettings() ?? current.camera };
+    const sim = simRef.current;
+    const formation = sim?.active
+      ? {
+          n: sim.n,
+          pos: sim.pos.slice(0, sim.n * 3),
+          nrm: sim.nrm.slice(0, sim.n * 3),
+          t: sim.t.slice(0, sim.n),
+          size: sim.size.slice(0, sim.n),
+          alpha: sim.alpha.slice(0, sim.n),
+          phase: sim.phase.slice(0, sim.n),
+          weight: sim.weight.slice(0, sim.n),
+          layer: sim.layer.slice(0, sim.n),
+          radius: sim.radius,
+        }
+      : buildFormation(exportProject.layers, Math.min(exportProject.count, QUALITY[exportProject.quality].maxCount), 1);
+    const state = sim?.active ? {
+      active: sim.active,
+      velocity: sim.vel.slice(0, sim.n * 3),
+      homeBase: sim.homeBase.slice(0, sim.n * 3),
+      time: sim.time,
+      tick: sim.tick,
+      cameraYawVelocity: camera?.yawVel ?? 0,
+      cameraPitchVelocity: camera?.pitchVel ?? 0,
+    } : {
+      active: formation.n,
+      velocity: new Float32Array(formation.n * 3),
+      homeBase: formation.pos,
+      time: 0,
+      tick: 0,
+      cameraYawVelocity: 0,
+      cameraPitchVelocity: 0,
+    };
+    return generate3DCode(exportProject, formation, exportRuntime, state);
+  };
 
   useEffect(() => {
     try { localStorage.setItem(DOCK_KEY, String(dockFrac)); } catch { /* storage can be unavailable in private windows */ }
@@ -267,10 +306,7 @@ export default function Studio3D({ active, modeSwitch, initialProject }: { activ
     setBusy(true);
     const id = window.setTimeout(() => {
       try {
-        const current = projRef.current;
-        const exportProject = { ...current, camera: camRef.current?.toSettings() ?? current.camera };
-        const formation = buildFormation(exportProject.layers, Math.min(exportProject.count, QUALITY[exportProject.quality].maxCount), 1);
-        const bundle = generate3DCode(exportProject, formation);
+        const bundle = createExportBundle();
         if (!cancelled) setExportBundle(bundle);
       } catch (error) {
         if (!cancelled) setNotice(`Code export failed: ${error instanceof Error ? error.message : String(error)}`);
@@ -608,20 +644,47 @@ export default function Studio3D({ active, modeSwitch, initialProject }: { activ
   );
   const selectedExport = EXPORT_FORMATS.find((format) => format.id === exportFormat) ?? EXPORT_FORMATS[0];
   const copyCode = async () => {
-    if (!exportBundle) return;
-    try { await navigator.clipboard.writeText(exportBundle[exportFormat]); setNotice("Code copied."); }
-    catch { setNotice("Clipboard access failed; download the code instead."); }
+    let bundle: CodeBundle;
+    try {
+      bundle = createExportBundle();
+    } catch (error) {
+      setNotice(`Code export failed: ${error instanceof Error ? error.message : String(error)}`);
+      return;
+    }
+    setExportBundle(bundle);
+    try {
+      await navigator.clipboard.writeText(bundle[exportFormat]);
+      setNotice("Code copied.");
+    } catch { setNotice("Clipboard access failed; download the code instead."); }
+  };
+  const downloadCode = () => {
+    try {
+      const bundle = createExportBundle();
+      setExportBundle(bundle);
+      download(new Blob([bundle[exportFormat]], { type: selectedExport.mime }), selectedExport.file);
+    } catch (error) {
+      setNotice(`Code export failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  };
+  const downloadProjectZip = () => {
+    try {
+      const bundle = createExportBundle();
+      setExportBundle(bundle);
+      download(build3DProjectZip(bundle), `${exportSlug(project.name)}-3d-project.zip`);
+    } catch (error) {
+      setNotice(`Code export failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
   };
   const exportCode = (
     <Section title="Code and web export">
-      <p className="s3-hint">Export a portable standalone scene or the separate HTML, CSS, runtime JavaScript and particle-data files. The standalone page embeds its particle data and runs without the studio or external dependencies. This lightweight export renders the selected formation, not the studio's full simulation engine.</p>
+      <p className="s3-hint">Export a portable standalone scene or the separate HTML, CSS, runtime JavaScript and particle-data files. The standalone page embeds its particle data and uses the same rendering, simulation, and interaction engine as the studio preview.</p>
       <Select label="Format" value={exportFormat} options={EXPORT_FORMATS.map((format) => ({ value: format.id, label: format.label }))} onChange={setExportFormat} />
       <textarea className="s3-code" readOnly spellCheck={false} aria-label="Generated 3D scene code" value={exportBundle?.[exportFormat] ?? (busy ? "Preparing scene export…" : "")} />
       <div className="s3-actions">
         <button type="button" className="s3-btn" disabled={!exportBundle} onClick={() => void copyCode()}>Copy code</button>
-        <button type="button" className="s3-btn" disabled={!exportBundle} onClick={() => exportBundle && download(new Blob([exportBundle[exportFormat]], { type: selectedExport.mime }), selectedExport.file)}>Download {selectedExport.file}</button>
+        <button type="button" className="s3-btn" disabled={!exportBundle} onClick={downloadCode}>Download {selectedExport.file}</button>
       </div>
-      <button type="button" className="s3-btn" disabled={!exportBundle} onClick={() => exportBundle && download(build3DProjectZip(exportBundle), `${exportSlug(project.name)}-3d-project.zip`)}>Download full project ZIP · HTML · CSS · JS · data · JSON · React</button>
+      <button type="button" className="s3-btn" disabled={!exportBundle} onClick={downloadProjectZip}>Download full project ZIP · HTML · CSS · JS · data · JSON · React</button>
     </Section>
   );
   const exportPanel = (

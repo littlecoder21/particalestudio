@@ -102,13 +102,13 @@ void main(){
 }`;
 const FS_VERT = `#version 300 es
 out vec2 uv; void main(){ vec2 p = vec2(float((gl_VertexID<<1)&2), float(gl_VertexID&2)); uv = p; gl_Position = vec4(p*2.0-1.0,0.0,1.0); }`;
-const DOWN = `#version 300 es
+export const DOWN = `#version 300 es
 precision highp float; in vec2 uv; uniform sampler2D t; uniform vec2 px; uniform float off; out vec4 o;
 void main(){ vec2 h = px*off; vec4 s = texture(t,uv)*4.0; s += texture(t,uv+vec2(-h.x,-h.y)); s += texture(t,uv+vec2(h.x,-h.y)); s += texture(t,uv+vec2(-h.x,h.y)); s += texture(t,uv+vec2(h.x,h.y)); o = s/8.0; }`;
-const UP = `#version 300 es
+export const UP = `#version 300 es
 precision highp float; in vec2 uv; uniform sampler2D t; uniform vec2 px; uniform float off; out vec4 o;
 void main(){ vec2 h = px*off; vec4 s = texture(t,uv+vec2(-h.x*2.0,0.0)); s += texture(t,uv+vec2(-h.x,h.y))*2.0; s += texture(t,uv+vec2(0.0,h.y*2.0)); s += texture(t,uv+vec2(h.x,h.y))*2.0; s += texture(t,uv+vec2(h.x*2.0,0.0)); s += texture(t,uv+vec2(h.x,-h.y))*2.0; s += texture(t,uv+vec2(0.0,-h.y*2.0)); s += texture(t,uv+vec2(-h.x,-h.y))*2.0; o = s/12.0; }`;
-const FADE = `#version 300 es
+export const FADE = `#version 300 es
 precision highp float; in vec2 uv; uniform sampler2D t; uniform float k; out vec4 o; void main(){ o = texture(t,uv)*k; }`;
 export const COMPOSITE = `#version 300 es
 precision highp float; in vec2 uv; uniform sampler2D scene, bloom; uniform float glow, exposure, vignette, grain, alphaMode, transparent, hasBloom, seed; uniform vec3 bg; out vec4 o;

@@ -9,6 +9,25 @@ const smooth = (value: number) => {
   return t * t * (3 - 2 * t);
 };
 
+/**
+ * Advanced per-beam shaping. The defaults reproduce the original beam profile exactly
+ * (0.8·exp(-q²) core + 0.28·exp(-(q/2.8)²) halo, full shimmer, palette-driven colour),
+ * so projects saved before these controls existed look identical.
+ */
+export const BEAM_DEFAULTS = { halo: 0.28, haloSize: 2.8, coreSharp: 1, shimmer: 1, lightColor: "#eef0f6", lightMix: 0 } as const;
+export const BEAM_LIMITS = {
+  halo: [0, 1], haloSize: [1, 8], coreSharp: [0.3, 4], shimmer: [0, 3], lightMix: [0, 1],
+} as const satisfies Record<string, readonly [number, number]>;
+
+/** "#rgb", "#rrggbb" or "#rrggbbaa" → [r, g, b] in 0..1. Anything else gives the neutral light colour. */
+export function hexToRgb01(hex: string): [number, number, number] {
+  const m = /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/.exec(typeof hex === "string" ? hex : "");
+  if (!m) return [238 / 255, 240 / 255, 246 / 255]; // #eef0f6
+  let h = m[1];
+  if (h.length === 3) h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2];
+  return [parseInt(h.slice(0, 2), 16) / 255, parseInt(h.slice(2, 4), 16) / 255, parseInt(h.slice(4, 6), 16) / 255];
+}
+
 export function makeLightBeam(over: Partial<LightBeam> = {}): LightBeam {
   const style = over.style ?? "shaft";
   const label = style[0].toUpperCase() + style.slice(1);
@@ -32,7 +51,24 @@ export function makeLightBeam(over: Partial<LightBeam> = {}): LightBeam {
     speed: 0.5,
     motion: 0.65,
     seed: 1,
+    ...BEAM_DEFAULTS,
     ...over,
+  };
+}
+
+/** Fills / clamps the advanced beam fields of an already-validated beam from raw (possibly hostile) JSON. */
+export function applyBeamExtras(beam: LightBeam | null, raw: unknown): LightBeam | null {
+  if (!beam) return null;
+  const r = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
+  const num = (v: unknown, d: number, lim: readonly [number, number]) => (typeof v === "number" && Number.isFinite(v) ? clamp(v, lim[0], lim[1]) : d);
+  return {
+    ...beam,
+    halo: num(r.halo, BEAM_DEFAULTS.halo, BEAM_LIMITS.halo),
+    haloSize: num(r.haloSize, BEAM_DEFAULTS.haloSize, BEAM_LIMITS.haloSize),
+    coreSharp: num(r.coreSharp, BEAM_DEFAULTS.coreSharp, BEAM_LIMITS.coreSharp),
+    shimmer: num(r.shimmer, BEAM_DEFAULTS.shimmer, BEAM_LIMITS.shimmer),
+    lightColor: typeof r.lightColor === "string" && /^#[0-9a-fA-F]{3,8}$/.test(r.lightColor) ? r.lightColor : BEAM_DEFAULTS.lightColor,
+    lightMix: num(r.lightMix, BEAM_DEFAULTS.lightMix, BEAM_LIMITS.lightMix),
   };
 }
 
@@ -45,6 +81,10 @@ export interface LightBeamFrame {
   tint: Float32Array;
   sideA: Float32Array;
   sideB: Float32Array;
+  /** (halo, haloSize, coreSharp, shimmer) per beam */
+  extra: Float32Array;
+  /** (r, g, b, mix) per beam: colour override blended over the palette colour */
+  color: Float32Array;
 }
 
 export interface LightBeamSample {
@@ -67,6 +107,8 @@ export function createLightBeamFrame(): LightBeamFrame {
     tint: vectors(),
     sideA: vectors(),
     sideB: vectors(),
+    extra: vectors(),
+    color: vectors(),
   };
 }
 
@@ -79,6 +121,8 @@ export function updateLightBeamFrame(beams: LightBeam[], time: number, frame: Li
   frame.tint.fill(0);
   frame.sideA.fill(0);
   frame.sideB.fill(0);
+  frame.extra.fill(0);
+  frame.color.fill(0);
 
   for (const beam of beams) {
     if (!beam.enabled || frame.count >= MAX_LIGHT_BEAMS) continue;
@@ -121,6 +165,16 @@ export function updateLightBeamFrame(beams: LightBeam[], time: number, frame: Li
     frame.tint[o + 2] = clamp(beam.twist, -8, 8);
     frame.sideA.set(sideA, o);
     frame.sideB.set(sideB, o);
+
+    frame.extra[o] = clamp(beam.halo ?? BEAM_DEFAULTS.halo, BEAM_LIMITS.halo[0], BEAM_LIMITS.halo[1]);
+    frame.extra[o + 1] = clamp(beam.haloSize ?? BEAM_DEFAULTS.haloSize, BEAM_LIMITS.haloSize[0], BEAM_LIMITS.haloSize[1]);
+    frame.extra[o + 2] = clamp(beam.coreSharp ?? BEAM_DEFAULTS.coreSharp, BEAM_LIMITS.coreSharp[0], BEAM_LIMITS.coreSharp[1]);
+    frame.extra[o + 3] = clamp(beam.shimmer ?? BEAM_DEFAULTS.shimmer, BEAM_LIMITS.shimmer[0], BEAM_LIMITS.shimmer[1]);
+    const rgb = hexToRgb01(beam.lightColor ?? BEAM_DEFAULTS.lightColor);
+    frame.color[o] = rgb[0];
+    frame.color[o + 1] = rgb[1];
+    frame.color[o + 2] = rgb[2];
+    frame.color[o + 3] = clamp(beam.lightMix ?? BEAM_DEFAULTS.lightMix, 0, 1);
   }
 }
 
@@ -136,6 +190,7 @@ export function sampleLightBeams(frame: LightBeamFrame, x: number, y: number, z:
 
     const speed = frame.animation[o], phase = frame.animation[o + 1], motion = frame.tint[o + 1];
     const style = frame.profile[o], spread = frame.profile[o + 1], bend = frame.profile[o + 2];
+    const halo = frame.extra[o], haloSize = frame.extra[o + 1], coreSharp = frame.extra[o + 2], shimmer = frame.extra[o + 3];
     const radialX = rx - dx * along * length, radialY = ry - dy * along * length, radialZ = rz - dz * along * length;
     const sideA = (radialX * frame.sideA[o] + radialY * frame.sideA[o + 1] + radialZ * frame.sideA[o + 2]);
     const sideB = (radialX * frame.sideB[o] + radialY * frame.sideB[o + 1] + radialZ * frame.sideB[o + 2]);
@@ -153,11 +208,11 @@ export function sampleLightBeams(frame: LightBeamFrame, x: number, y: number, z:
     const swell = 1 + 0.38 * motion * Math.sin(along * 4.2 + phase + time * speed * 0.33);
     const radius = frame.directionWidth[o + 3] * (1 + widen * along) * swell;
     const q = Math.hypot(sideA - bendA, sideB - bendB) / Math.max(0.001, radius);
-    if (q > 7.4) continue;
-    const profile = 0.8 * Math.exp(-q * q) + 0.28 * Math.exp(-Math.pow(q / 2.8, 2));
+    if (q > 7.4 * Math.max(1, haloSize / 2.8)) continue;
+    const profile = 0.8 * Math.exp(-q * q * coreSharp) + halo * Math.exp(-(q * q) / (haloSize * haloSize));
     const fadeIn = frame.animation[o + 2], fadeOut = frame.animation[o + 3];
     const alongFade = smooth(along / fadeIn) * (1 - smooth((along - (1 - fadeOut)) / fadeOut));
-    const wave = 0.84 + 0.16 * Math.sin(along * 9 - time * speed * 0.5 + phase) + 0.07 * Math.sin(along * 23 + q * 0.6 + time * speed * 1.6 + phase);
+    const wave = 0.84 + shimmer * (0.16 * Math.sin(along * 9 - time * speed * 0.5 + phase) + 0.07 * Math.sin(along * 23 + q * 0.6 + time * speed * 1.6 + phase));
     const contribution = profile * alongFade * Math.max(0, wave) * frame.profile[o + 3];
     total += contribution;
     colorSum += contribution * frame.tint[o];
