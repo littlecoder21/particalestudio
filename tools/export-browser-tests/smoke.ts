@@ -1,0 +1,34 @@
+import { chromium } from "playwright";
+import { join } from "node:path";
+import { engineBundles, defaultSettings, localThree, makeScene, resetDir, serveDirectory, THREE_URL, write, writeStandalone, writeWebsite } from "./lib";
+import { readFileSync } from "node:fs";
+
+const out = join(process.env.PS_OUT ?? "/tmp/ps-browser", "smoke");
+resetDir(out);
+const spec = makeScene();
+const prepared = await writeWebsite(out, "hero", spec, defaultSettings());
+await writeStandalone(out, "standalone", prepared);
+write(out, "hero/index.html", `<!doctype html><meta charset=utf-8><body style="margin:0"><div id="s" style="width:640px;height:400px"></div><script type="module">
+import { createParticleScene } from "./particle-export/particle-engine.js";
+window.scene = await createParticleScene({ container: "#s", data: "./particle-export/particle-data.bin", config: "./particle-export/particle-config.json", lazy: false });
+window.done = true;
+</script>`);
+const { server, origin } = await serveDirectory(out);
+const browser = await chromium.launch({ executablePath: process.env.CHROME_PATH, args: ["--no-sandbox", "--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist"] });
+const page = await browser.newPage({ viewport: { width: 800, height: 500 } });
+const logs: string[] = [];
+page.on("console", (m) => logs.push(`[${m.type()}] ${m.text()}`));
+page.on("pageerror", (e) => logs.push(`[pageerror] ${e.message}`));
+const three = localThree();
+await page.route(THREE_URL, (route) => three ? route.fulfill({ status: 200, contentType: "text/javascript", headers: { "access-control-allow-origin": "*" }, body: readFileSync(three) }) : route.continue());
+await page.goto(`${origin}/hero/index.html`);
+await page.waitForFunction(() => (window as any).done === true, null, { timeout: 30000 }).catch(() => {});
+const info = await page.evaluate(() => { const s = (window as any).scene; return s ? { state: s.state, info: s.info } : null; });
+console.log("engine page:", JSON.stringify(info));
+await page.screenshot({ path: join(out, "engine.png") });
+await page.goto(`file://${join(out, "standalone.html")}`);
+await page.waitForSelector("#ps-root[data-ps-state=ready], #ps-root[data-ps-state=paused], .ps-particle__message", { timeout: 30000 }).catch(() => {});
+console.log("standalone state:", await page.getAttribute("#ps-root", "data-ps-state"));
+await page.screenshot({ path: join(out, "standalone.png") });
+console.log(logs.join("\n") || "(no console output)");
+await browser.close(); server.close();

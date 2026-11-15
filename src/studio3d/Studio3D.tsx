@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
+import { Suspense, lazy, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import "./studio3d.css";
 import type { Behavior, BehaviorType, Deformer, DeformerType, GeneratorId, Layer, LightBeam, LightBeamStyle, Look, ParamDef, Project3D, QualityLevel } from "./types";
 import { MAX_LAYERS, MAX_LIGHT_BEAMS, QUALITY } from "./types";
@@ -16,6 +16,11 @@ import { clamp, EASING_NAMES, type EasingName } from "./math";
 import { GradientEditor, Range, Section, Segmented, Select, TextField, Toggle, Vec3Input } from "./controls3d";
 import { EXPORT_FORMATS, build3DProjectZip, exportSlug, generate3DCode, type CodeBundle, type ExportFormat } from "./codeExport";
 import exportRuntime from "virtual:studio3d-export-runtime";
+import type { ExportCapture } from "./export/bundle";
+import type { ExportFrame } from "./export/ExportPanel";
+
+// The multi-format exporter (website / standalone / project ZIP) loads on demand, together with its engine bundles.
+const ExportPanel = lazy(() => import("./export/ExportPanel"));
 
 const STORE_KEY = "particle-studio-3d-project-v1";
 type Tab = "presets" | "shape" | "dust" | "interact" | "text" | "motion" | "look" | "camera" | "timeline" | "export";
@@ -347,6 +352,33 @@ export default function Studio3D({ active, modeSwitch, initialProject }: { activ
   };
   const setLook = (patch: Partial<Look>) => upd((p) => ({ ...p, look: { ...p.look, ...patch } }));
   const snapshotInput = (): RenderInput | null => { const s = simRef.current, c = camRef.current; if (!s || !c) return null; const p = projRef.current; return { n: s.active, pos: s.pos, vel: s.vel, nrm: s.nrm, t: s.t, size: s.size, alpha: s.alpha, phase: s.phase, layer: s.layer, attrVersion: s.attrVersion + 1000000, time: s.time, camera: c, look: p.look, layers: p.layers.map((l) => ({ palette: l.palette, sizeMul: l.sizeMul, opacityMul: l.opacityMul })), beams: p.beams, bloomLevel: QUALITY[p.quality].bloom, focus: c.distance, range: Math.max(0.5, s.radius) }; };
+  /** Snapshot of the live scene for the Website / Standalone / Project exporters. Copies, so the sim can keep running. */
+  const captureExport = (drawn?: number): ExportCapture | null => {
+    const sim = simRef.current, cam = camRef.current, current = projRef.current;
+    if (!sim || sim.n === 0) return null;
+    const n = sim.n;
+    return {
+      source: {
+        n, pos: sim.pos.slice(0, n * 3), nrm: sim.nrm.slice(0, n * 3), t: sim.t.slice(0, n), size: sim.size.slice(0, n), alpha: sim.alpha.slice(0, n), phase: sim.phase.slice(0, n),
+        weight: sim.weight.slice(0, n), layer: sim.layer.slice(0, n), radius: sim.radius, velocity: sim.vel.slice(0, n * 3), homeBase: sim.homeBase.slice(0, n * 3),
+      },
+      camera: cam?.toSettings() ?? current.camera,
+      state: { time: sim.time, tick: sim.tick, cameraYawVelocity: cam?.yawVel ?? 0, cameraPitchVelocity: cam?.pitchVel ?? 0 },
+      // Exports draw every particle; the studio's adaptive quality is a property of this device, not of the scene.
+      active: drawn ?? n,
+    };
+  };
+  /** The same instant seen two ways: the studio's renderer and an export capture, for the "compare" check. Everything is read synchronously. */
+  const exportFrame = (maxSide: number): ExportFrame | null => {
+    const sim = simRef.current, renderer = rendRef.current, host = hostRef.current, inp = snapshotInput();
+    if (!sim || !renderer || !host || !inp) return null;
+    const rect = host.getBoundingClientRect(), k = Math.min(1, maxSide / Math.max(rect.width, rect.height, 1));
+    const width = Math.max(64, Math.round(rect.width * k)), height = Math.max(64, Math.round(rect.height * k));
+    const capture = captureExport(sim.active);
+    if (!capture) return null;
+    const studio = renderer.info.kind === "webgl2" ? renderer.snapshot(inp, width, height, false) : Promise.resolve(null);
+    return { capture, studio, width, height, drawn: sim.active, total: sim.n, backend: renderer.info.kind };
+  };
   const exportPng = async () => {
     const r = rendRef.current, inp = snapshotInput(), host = hostRef.current; if (!r || !inp || !host) return;
     const b = host.getBoundingClientRect(), w = Math.round(b.width * expOpts.scale), h = Math.round(b.height * expOpts.scale);
@@ -676,8 +708,8 @@ export default function Studio3D({ active, modeSwitch, initialProject }: { activ
     }
   };
   const exportCode = (
-    <Section title="Code and web export">
-      <p className="s3-hint">Export a portable standalone scene or the separate HTML, CSS, runtime JavaScript and particle-data files. The standalone page embeds its particle data and uses the same rendering, simulation, and interaction engine as the studio preview.</p>
+    <Section title="Classic code export">
+      <p className="s3-hint">The original exporter, unchanged: export a portable standalone scene or the separate HTML, CSS, runtime JavaScript and particle-data files. The standalone page embeds its particle data and uses the same rendering, simulation, and interaction engine as the studio preview.</p>
       <Select label="Format" value={exportFormat} options={EXPORT_FORMATS.map((format) => ({ value: format.id, label: format.label }))} onChange={setExportFormat} />
       <textarea className="s3-code" readOnly spellCheck={false} aria-label="Generated 3D scene code" value={exportBundle?.[exportFormat] ?? (busy ? "Preparing scene export…" : "")} />
       <div className="s3-actions">
@@ -694,6 +726,9 @@ export default function Studio3D({ active, modeSwitch, initialProject }: { activ
         <div className="s3-actions"><button type="button" className="s3-btn" onClick={exportJson}>Save JSON</button><button type="button" className="s3-btn" onClick={() => fileRef.current?.click()}>Load JSON</button><input ref={fileRef} type="file" accept="application/json,.json" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) void importJson(f); e.target.value = ""; }} /></div>
         <button type="button" className="s3-btn danger" onClick={() => { morphDur.current = 1; const p = defaultProject(); setProject(p); camRef.current?.apply(p.camera); }}>Reset everything</button>
       </Section>
+      <Suspense fallback={<p className="s3-hint">Loading the exporter…</p>}>
+        <ExportPanel project={project} capture={() => captureExport()} frame={exportFrame} notify={setNotice} />
+      </Suspense>
       {exportCode}
       <Section title="Image">
         <Segmented value={String(expOpts.scale) as "1" | "2" | "4"} options={[{ value: "1", label: "1×" }, { value: "2", label: "2×" }, { value: "4", label: "4×" }]} onChange={(v) => setExpOpts((o) => ({ ...o, scale: Number(v) }))} />
