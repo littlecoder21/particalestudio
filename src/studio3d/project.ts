@@ -5,7 +5,7 @@ import { EASING_NAMES, clamp, type EasingName } from "./math";
 import { makeBehavior, makeDeformer, newId, BEHAVIOR_TYPES, DEFORMER_TYPES } from "./behaviors";
 import { PALETTE_PRESETS } from "./palette";
 import { defaultParams, getGenerator, isGeneratorId, normalizeParams } from "./generators/index";
-import { makeLightBeam } from "./lightBeams";
+import { applyBeamExtras, makeLightBeam } from "./lightBeams";
 
 export const DEFAULT_LOOK: Look = {
   palette: PALETTE_PRESETS[0].stops.map((s) => ({ ...s })), size: 0.0075, sizeVariation: 0.35, sizeAttenuation: true, opacity: 0.85, emission: 1.1, shape: "soft", softness: 0.8, blend: "additive",
@@ -56,7 +56,7 @@ function parseBeam(raw: unknown, index: number): LightBeam | null {
   const directionLength = Math.hypot(...direction);
   const legacyAzimuth = directionLength > 1e-6 ? Math.atan2(direction[0], direction[2]) * 180 / Math.PI : defaults.azimuth;
   const legacyElevation = directionLength > 1e-6 ? Math.asin(clamp(direction[1] / directionLength, -1, 1)) * 180 / Math.PI : defaults.elevation;
-  return {
+  const beam: LightBeam = {
     id: typeof raw.id === "string" ? raw.id.slice(0, 80) : defaults.id,
     name: typeof raw.name === "string" ? raw.name.slice(0, 32) : defaults.name,
     enabled: raw.enabled !== false,
@@ -77,6 +77,7 @@ function parseBeam(raw: unknown, index: number): LightBeam | null {
     motion: n(raw.motion, defaults.motion, 0, 1),
     seed: Math.floor(n(raw.seed, index + 1, 0, 1e9)),
   };
+  return applyBeamExtras(beam, raw);
 }
 function look(raw: unknown, base: Look): Look {
   if (!isObj(raw)) return { ...base, palette: base.palette.map((p) => ({ ...p })) };

@@ -60,3 +60,23 @@ test("project migration caps and normalizes independently editable beams", () =>
   assert.equal(migrated.beams[0].azimuth, 90);
   assert.equal(migrated.beams[0].elevation, 0);
 });
+
+test("project migration preserves and clamps advanced beam settings", () => {
+  const project = defaultProject();
+  const migrated = migrateProject({
+    ...project,
+    beams: [
+      { ...makeLightBeam(), halo: 5, haloSize: 0, coreSharp: 99, shimmer: -1, lightColor: "#abc", lightMix: 2 },
+      { ...makeLightBeam(), halo: undefined, haloSize: undefined, coreSharp: undefined, shimmer: undefined, lightColor: undefined, lightMix: undefined },
+    ],
+  }).project;
+
+  assert.deepEqual(
+    [migrated.beams[0].halo, migrated.beams[0].haloSize, migrated.beams[0].coreSharp, migrated.beams[0].shimmer, migrated.beams[0].lightColor, migrated.beams[0].lightMix],
+    [1, 1, 4, 0, "#abc", 1],
+  );
+  assert.deepEqual(
+    [migrated.beams[1].halo, migrated.beams[1].haloSize, migrated.beams[1].coreSharp, migrated.beams[1].shimmer, migrated.beams[1].lightColor, migrated.beams[1].lightMix],
+    [0.28, 2.8, 1, 1, "#eef0f6", 0],
+  );
+});

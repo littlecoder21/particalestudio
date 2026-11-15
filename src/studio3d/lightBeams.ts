@@ -57,6 +57,8 @@ export function makeLightBeam(over: Partial<LightBeam> = {}): LightBeam {
 }
 
 /** Fills / clamps the advanced beam fields of an already-validated beam from raw (possibly hostile) JSON. */
+export function applyBeamExtras(beam: null, raw: unknown): null;
+export function applyBeamExtras(beam: LightBeam, raw: unknown): LightBeam;
 export function applyBeamExtras(beam: LightBeam | null, raw: unknown): LightBeam | null {
   if (!beam) return null;
   const r = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};

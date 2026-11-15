@@ -45,6 +45,12 @@ export interface LightBeam {
   speed: number;
   motion: number;
   seed: number;
+  halo?: number;
+  haloSize?: number;
+  coreSharp?: number;
+  shimmer?: number;
+  lightColor?: string;
+  lightMix?: number;
 }
 
 /** One generated particle formation — structure of arrays, every array has length n (or 3n). */
