@@ -1,18 +1,30 @@
 import type { SvgSamplePoint } from "./svgSource";
 import { getGeneratorPoint, type GeneratorType } from "./generators";
-import type { ParticleEffect } from "./effects";
+import { availableEffects, type ParticleEffect } from "./effects";
+import { createStudio2DRuntime, type FxParticle } from "./studio2d/runtime";
+import { DEFAULT_STUDIO2D, type Studio2DSettings } from "./studio2d/types";
+import {
+  motionAcceleration,
+  MOTION_STYLES,
+  TOUCH_BEHAVIORS,
+  touchForce,
+  type TouchBehavior,
+} from "./studio2d/catalogs";
 
 export type Emitter = "Point" | "Circle" | "Ring" | "Line" | "Fountain" | "SVG" | "Designer";
-export type Motion = "Off" | "Float" | "Orbit" | "Flow" | "Burst";
+export type Motion = "Off" | (typeof MOTION_STYLES)[number];
 export type ParticleShape =
   | "Circle" | "Square" | "Diamond" | "Star" | "Triangle" | "Pentagon"
   | "Hexagon" | "Polygon" | "Heart" | "Sparkle" | "Ring" | "Cross" | "Custom";
-export type Interaction = "Repel" | "Attract" | "Swirl" | "Off";
+export type Interaction = TouchBehavior;
 export type BackgroundMode = "Solid" | "Gradient" | "Transparent";
 export type BoundsMode = "Bounce" | "Wrap" | "Contain" | "Escape";
 export type PopulationMode = "Steady" | "Grow" | "Shrink";
 export type SvgMorphEasing = "Linear" | "Ease In Out" | "Ease Out";
 export type SvgMorphType = "Direct" | "Dissolve" | "Scatter";
+
+/** Highest particle count the engine will simulate. */
+export const MAX_PARTICLES = 4000;
 
 export interface ParticleSettings {
   count: number;
@@ -61,17 +73,16 @@ export interface ParticleSettings {
   trails: boolean;
   interactive: boolean;
   playing: boolean;
+  /** Draw particles as shaded volumetric forms instead of flat sprites. */
+  volumeLook: boolean;
+  /** Shape-Locked Motion, scene light, FX and backdrops. Optional so older projects keep working. */
+  studio?: Studio2DSettings;
 }
 
-interface Particle {
-  x: number;
-  y: number;
-  vx: number;
-  vy: number;
+interface Particle extends FxParticle {
   age: number;
   life: number;
   size: number;
-  phase: number;
   sourceColor: string | null;
   depth: number;
   colorIndex: number;
@@ -82,6 +93,15 @@ interface Pointer {
   x: number;
   y: number;
   active: boolean;
+}
+
+interface DrawFlags {
+  lock: boolean;
+  gradient: boolean;
+  light: boolean;
+  bokeh: number;
+  glints: number;
+  extraEffects: readonly number[];
 }
 
 function randomBetween(min: number, max: number): number {
@@ -110,6 +130,20 @@ function quantizeSpriteColor(color: string): string {
   if (!channels || channels.length !== 3) return color;
   const rounded = channels.map((channel) => Math.min(255, Math.round(Number(channel) / 16) * 16));
   return `rgb(${rounded[0]}, ${rounded[1]}, ${rounded[2]})`;
+}
+
+const quantizedHexCache = new Map<string, string>();
+/** "#a1b2c3" -> quantized "rgb(...)" sprite colour, cached (used by locked SVG-coloured particles). */
+function quantizedHex(hex: string): string {
+  let value = quantizedHexCache.get(hex);
+  if (value === undefined) {
+    if (quantizedHexCache.size > 4096) quantizedHexCache.clear();
+    const n = Number.parseInt(hex.slice(1), 16);
+    const q = (channel: number) => Math.min(255, Math.round(channel / 16) * 16);
+    value = `rgb(${q((n >> 16) & 255)}, ${q((n >> 8) & 255)}, ${q(n & 255)})`;
+    quantizedHexCache.set(hex, value);
+  }
+  return value;
 }
 
 function hexToRgb(color: string): [number, number, number] {
@@ -225,6 +259,10 @@ export function startParticleEngine(
   const context = canvas.getContext("2d", { alpha: true });
   if (!context) throw new Error("This browser does not support Canvas 2D rendering.");
 
+  // Shape-Locked Motion, scene light, FX and backdrops (see studio2d/runtime.ts).
+  const studio2d = createStudio2DRuntime();
+  const goldenAngle = Math.PI * (3 - Math.sqrt(5));
+
   const particles: Particle[] = [];
   const pointer: Pointer = { x: 0, y: 0, active: false };
   let width = 1;
@@ -248,8 +286,12 @@ export function startParticleEngine(
   let morphCurrentForm = 0;
   let morphDirection: 1 | -1 = 1;
   let lastMorphSignature = "";
+  // Shape-lock bookkeeping: home positions are rebuilt only when something that defines them changes.
+  let homesDirty = true;
+  let placeFrom = Number.POSITIVE_INFINITY;
+  let lockWasOn = false;
   const spriteCache = new Map<string, HTMLCanvasElement>();
-  const maximumCachedSprites = 384;
+  const maximumCachedSprites = 1536;
   const rainbowPalette = Array.from({ length: 32 }, (_, index) =>
     `hsl(${Math.round((index / 32) * 360)}, 100%, 68%)`,
   );
@@ -262,6 +304,16 @@ export function startParticleEngine(
     canvas.width = Math.round(width * dpr);
     canvas.height = Math.round(height * dpr);
     context.setTransform(dpr, 0, 0, dpr, 0, 0);
+    homesDirty = true;
+  };
+
+  const newParticle = (index: number): Particle => {
+    const particle: Particle = {
+      x: 0, y: 0, vx: 0, vy: 0, age: 0, life: 0, size: 1, phase: 0, sourceColor: null,
+      depth: 1, colorIndex: 0, morphAlpha: 1, ...studio2d.blank(),
+    };
+    studio2d.initParticle(particle, index);
+    return particle;
   };
 
   const spawn = (
@@ -379,12 +431,80 @@ export function startParticleEngine(
     }
   };
 
+  /**
+   * Shape-Locked Motion: every particle gets a stable home position taken from the generated /
+   * imported formation. Particles with index >= placeFromIndex are also moved onto their home
+   * immediately; the others keep their position and are pulled back by the spring.
+   */
+  const computeHomes = (
+    settings: ParticleSettings,
+    sourcePoints: readonly SvgSamplePoint[],
+    placeFromIndex: number,
+  ) => {
+    const total = Math.max(Math.min(settings.count, MAX_PARTICLES), 1);
+    const centerX = width * 0.5;
+    const centerY = height * 0.5;
+    const spread = settings.spread / 100;
+    const minSide = Math.min(width, height);
+    const scale = minSide * 0.72;
+    const usesPoints = settings.generator === "Source Shape" &&
+      (settings.emitter === "SVG" || settings.emitter === "Designer") && sourcePoints.length > 0;
+    for (let index = 0; index < particles.length; index += 1) {
+      const particle = particles[index];
+      let homeX = centerX;
+      let homeY = centerY;
+      if (settings.generator !== "Source Shape") {
+        const generated = getGeneratorPoint(settings.generator, index, total, width, height, settings.spread);
+        homeX = generated.x;
+        homeY = generated.y;
+        particle.depth = generated.depth;
+      } else if (usesPoints) {
+        const point = sourcePoints[Math.min(sourcePoints.length - 1, Math.floor((index * sourcePoints.length) / total))];
+        homeX = centerX + point.x * scale;
+        homeY = centerY + point.y * scale;
+        particle.sourceColor = settings.preserveSvgColors ? point.color : null;
+      } else {
+        const angle = index * goldenAngle;
+        switch (settings.emitter) {
+          case "Circle": {
+            const radius = Math.sqrt((index + 0.5) / total) * spread * minSide * 0.5;
+            homeX += Math.cos(angle) * radius;
+            homeY += Math.sin(angle) * radius;
+            break;
+          }
+          case "Ring":
+            homeX += Math.cos(angle) * spread * minSide * 0.5;
+            homeY += Math.sin(angle) * spread * minSide * 0.5;
+            break;
+          case "Line":
+            homeX += ((index / Math.max(total - 1, 1)) * 2 - 1) * spread * width * 0.5;
+            break;
+          case "Fountain":
+            homeX += ((index / Math.max(total - 1, 1)) * 2 - 1) * spread * width * 0.15;
+            homeY += height * 0.18;
+            break;
+          default:
+            break;
+        }
+      }
+      particle.targetX = homeX;
+      particle.targetY = homeY;
+      if (index >= placeFromIndex) {
+        particle.x = homeX;
+        particle.y = homeY;
+        particle.vx = 0;
+        particle.vy = 0;
+      }
+    }
+    studio2d.finalizeHomes(particles);
+  };
+
   const syncCount = (
     settings: ParticleSettings,
     svgSequencePoints: readonly (readonly SvgSamplePoint[])[],
     sourcePoints: readonly SvgSamplePoint[],
   ) => {
-    const count = Math.min(settings.count, 1800);
+    const count = Math.min(settings.count, MAX_PARTICLES);
     const countChanged = count !== lastCount;
     const shouldRespawn = settings.emitter !== lastEmitter || settings.generator !== lastGenerator ||
       sourcePoints !== lastSvgPoints;
@@ -423,7 +543,7 @@ export function startParticleEngine(
       particles.length < count &&
       (settings.populationMode === "Steady" || initializeShrink)
     ) {
-      const particle: Particle = { x: 0, y: 0, vx: 0, vy: 0, age: 0, life: 0, size: 1, phase: 0, sourceColor: null, depth: 1, colorIndex: 0, morphAlpha: 1 };
+      const particle = newParticle(particles.length);
       spawn(particle, settings, sourcePoints, particles.length);
       particles.push(particle);
     }
@@ -433,33 +553,50 @@ export function startParticleEngine(
     } else if (shouldRespawn) {
       for (const particle of particles) spawn(particle, settings, sourcePoints);
     }
+    // The formation changed: rebuild home positions and snap everything onto them (Shape-Locked Motion only).
+    homesDirty = true;
+    placeFrom = 0;
   };
 
-  const drawParticle = (particle: Particle, settings: ParticleSettings, alpha: number, time: number) => {
-    const progress = settings.motion === "Off" ? 0.5 : particle.age / particle.life;
-    const fade = Math.min(progress * 7, (1 - progress) * 2.5, 1) * particle.morphAlpha;
+  const drawParticle = (
+    particle: Particle,
+    settings: ParticleSettings,
+    alpha: number,
+    time: number,
+    flags: DrawFlags,
+  ) => {
+    const locked = flags.lock;
+    const progress = locked || settings.motion === "Off" ? 0.5 : particle.age / particle.life;
+    const fade = locked
+      ? particle.morphAlpha
+      : Math.min(progress * 7, (1 - progress) * 2.5, 1) * particle.morphAlpha;
     const twinkle = settings.effects.includes("Twinkle")
       ? 0.4 + (Math.sin(time * 0.004 + particle.phase * 2) + 1) * 0.3
       : 1;
     const cycle = settings.effects.includes("Color Cycle")
       ? rainbowPalette[Math.floor((time * 0.008 + particle.phase * 5 + progress * 10) % rainbowPalette.length + rainbowPalette.length) % rainbowPalette.length]
       : null;
-    const color = cycle ?? (settings.preserveSvgColors && particle.sourceColor
-      ? colorAtAge([particle.sourceColor, settings.accent], 0, progress)
-      : colorAtAge(settings.palette, particle.colorIndex, progress));
-    const spriteColor = quantizeSpriteColor(color);
+    let spriteColor: string;
+    if (cycle) {
+      spriteColor = quantizeSpriteColor(cycle);
+    } else if (flags.gradient) {
+      spriteColor = studio2d.gradientColor(particle.x, particle.y);
+    } else if (settings.preserveSvgColors && particle.sourceColor) {
+      spriteColor = locked
+        ? quantizedHex(particle.sourceColor)
+        : quantizeSpriteColor(colorAtAge([particle.sourceColor, settings.accent], 0, progress));
+    } else {
+      spriteColor = quantizeSpriteColor(colorAtAge(settings.palette, particle.colorIndex, progress));
+    }
     const pulse = settings.effects.includes("Pulse")
       ? 0.72 + (Math.sin(time * 0.003 + particle.phase) + 1) * 0.2
       : 1;
-    const size = settings.size * particle.size * particle.depth * pulse * (0.7 + Math.sin(progress * Math.PI) * 0.3);
+    const energyBoost = 1 + 0.5 * particle.energy;
+    const size = settings.size * particle.size * particle.depth * pulse * energyBoost *
+      (locked ? 1 : 0.7 + Math.sin(progress * Math.PI) * 0.3);
     const roundedSize = Math.max(0.5, Math.round(size * 2) / 2);
-    const style = `${settings.shape}:${settings.customShapePath}:${settings.glow}:${settings.size}:${settings.color}:${settings.accent}`;
-    if (style !== spriteStyle) {
-      spriteStyle = style;
-      spriteCache.clear();
-    }
 
-    const key = `${spriteColor}:${roundedSize}`;
+    const key = `${spriteColor}:${roundedSize}:${settings.volumeLook ? "volume" : "flat"}`;
     let sprite = spriteCache.get(key);
     if (!sprite) {
       if (spriteCache.size >= maximumCachedSprites) {
@@ -478,11 +615,113 @@ export function startParticleEngine(
       spriteContext.shadowColor = spriteColor;
       spriteContext.shadowBlur = settings.glow;
       drawShape(spriteContext, dimension / 2, dimension / 2, roundedSize, settings.shape, settings.customShapePath);
+      if (settings.volumeLook) {
+        spriteContext.save();
+        spriteContext.globalCompositeOperation = "source-atop";
+        const highlight = spriteContext.createRadialGradient(
+          dimension * 0.34, dimension * 0.32, 0,
+          dimension * 0.5, dimension * 0.5, roundedSize * 1.65,
+        );
+        highlight.addColorStop(0, "rgba(255,255,255,0.9)");
+        highlight.addColorStop(0.18, "rgba(255,255,255,0.3)");
+        highlight.addColorStop(0.62, "rgba(255,255,255,0)");
+        highlight.addColorStop(1, "rgba(4,8,24,0.72)");
+        spriteContext.fillStyle = highlight;
+        spriteContext.fillRect(0, 0, dimension, dimension);
+        spriteContext.restore();
+      }
       spriteCache.set(key, sprite);
     }
 
-    context.globalAlpha = Math.max(0, fade * twinkle * settings.opacity * alpha);
-    context.drawImage(sprite, particle.x - sprite.width / 2, particle.y - sprite.height / 2);
+    // Scene light: particles are only visible where light falls on them.
+    const lightFactor = flags.light ? studio2d.lightFactor(particle) : 1;
+    const base = Math.max(0, fade * twinkle * settings.opacity * alpha * lightFactor * energyBoost);
+    if (flags.bokeh > 0 && particle.seed < flags.bokeh) {
+      // Out-of-focus mote: the same sprite, larger and fainter.
+      const bokehSize = 2.6;
+      context.globalAlpha = Math.min(1, base * 0.4);
+      context.drawImage(
+        sprite,
+        particle.x - (sprite.width * bokehSize) / 2,
+        particle.y - (sprite.height * bokehSize) / 2,
+        sprite.width * bokehSize,
+        sprite.height * bokehSize,
+      );
+    } else {
+      context.globalAlpha = Math.min(1, base);
+      context.drawImage(sprite, particle.x - sprite.width / 2, particle.y - sprite.height / 2);
+    }
+    if (flags.extraEffects.length > 0) {
+      for (const effectIndex of flags.extraEffects) {
+        const profile = effectIndex - 7;
+        const family = availableEffects[effectIndex].style;
+        const variation = Math.floor(profile / 10);
+        const phase = time * (0.0012 + variation * 0.00028) + particle.phase + particle.seed * 8;
+        const radius = Math.max(1.5, size * (0.9 + variation * 0.16));
+        context.save();
+        context.globalAlpha = Math.min(0.8, base * (0.24 + variation * 0.07) * (family === 4 ? 0.65 + 0.35 * Math.sin(phase * 0.7) : 1));
+        context.strokeStyle = spriteColor;
+        context.fillStyle = spriteColor;
+        context.lineWidth = Math.max(0.55, size * 0.13);
+        context.beginPath();
+        if (family === 0 || family === 5) {
+          const pulseRadius = radius * (1.15 + 0.25 * Math.sin(phase));
+          context.arc(particle.x, particle.y, pulseRadius, 0, Math.PI * 2);
+          context.stroke();
+        } else if (family === 1) {
+          const orbit = phase + family * 0.7;
+          const orbitRadius = radius * (1.2 + variation * 0.12);
+          context.arc(particle.x + Math.cos(orbit) * orbitRadius, particle.y + Math.sin(orbit) * orbitRadius, Math.max(0.7, radius * 0.2), 0, Math.PI * 2);
+          context.fill();
+        } else if (family === 2) {
+          const offset = radius * (0.28 + variation * 0.08);
+          context.arc(particle.x - offset, particle.y, Math.max(0.5, radius * 0.42), 0, Math.PI * 2);
+          context.arc(particle.x + offset, particle.y, Math.max(0.5, radius * 0.42), 0, Math.PI * 2);
+          context.fill();
+        } else if (family === 3) {
+          const flare = radius * (0.7 + 0.2 * Math.sin(phase * 2));
+          context.moveTo(particle.x - flare, particle.y);
+          context.lineTo(particle.x + flare, particle.y);
+          context.moveTo(particle.x, particle.y - flare);
+          context.lineTo(particle.x, particle.y + flare);
+          context.stroke();
+        } else if (family === 4) {
+          const halo = radius * (1 + particle.depth * 0.18);
+          context.ellipse(particle.x, particle.y, halo, halo * 0.72, phase, 0, Math.PI * 2);
+          context.stroke();
+        } else if (family === 6) {
+          const trail = radius * (1 + variation * 0.35);
+          context.moveTo(particle.x, particle.y);
+          context.lineTo(particle.x - particle.vx * trail, particle.y - particle.vy * trail);
+          context.stroke();
+        } else if (family === 7) {
+          const glint = radius * (0.3 + variation * 0.08);
+          context.moveTo(particle.x - glint, particle.y);
+          context.lineTo(particle.x + glint, particle.y);
+          context.moveTo(particle.x, particle.y - glint);
+          context.lineTo(particle.x, particle.y + glint);
+          context.stroke();
+        } else if (family === 8) {
+          const wave = radius * 0.7;
+          context.moveTo(particle.x - wave, particle.y);
+          for (let point = 1; point <= 6; point += 1) {
+            const x = particle.x - wave + (point / 6) * wave * 2;
+            context.lineTo(x, particle.y + Math.sin(phase + point * 1.05) * wave * 0.35);
+          }
+          context.stroke();
+        } else {
+          const shadow = radius * (1 + variation * 0.1);
+          context.ellipse(particle.x + shadow * 0.24, particle.y + shadow * 0.32, shadow, shadow * 0.34, phase, 0, Math.PI * 2);
+          context.stroke();
+        }
+        context.restore();
+      }
+    }
+    if (flags.light && particle.lit > 0.55) {
+      studio2d.glint(particle.x, particle.y, particle.lit, size, particle.seed);
+    } else if (flags.glints > 0 && particle.seed > 0.84 && Math.sin(time * 0.0021 + particle.phase * 3) > 0.94) {
+      studio2d.glint(particle.x, particle.y, 0.95, size, particle.seed);
+    }
 
     if (settings.effects.includes("Sparkles") && particle.phase % 3 < 0.8 && Math.sin(time * 0.006 + particle.phase * 4) > 0.65) {
       const sparkleSize = Math.max(2, size * 0.7);
@@ -601,6 +840,7 @@ export function startParticleEngine(
 
   const animate = (time: number) => {
     const settings = getSettings();
+    const studio = settings.studio ?? DEFAULT_STUDIO2D;
     const svgPoints = getSvgPoints();
     const designerPoints = getDesignerPoints();
     const sourcePoints = settings.emitter === "Designer" ? designerPoints : svgPoints;
@@ -608,6 +848,27 @@ export function startParticleEngine(
     syncCount(settings, svgSequencePoints, sourcePoints);
     const delta = Math.min((time - (previousTime || time)) / 1000, 0.04);
     previousTime = time;
+
+    const settingsChanged = studio2d.begin(studio, width, height, delta, settings.playing, settings.palette);
+    studio2d.setPointer(pointer.x, pointer.y, pointer.active);
+    const lockOn = studio2d.lockEnabled();
+    if (lockOn !== lockWasOn) {
+      // Switching on: particles spring back to their homes. Switching off: free motion resumes from where they are.
+      lockWasOn = lockOn;
+      homesDirty = lockOn;
+    }
+    if (lockOn) {
+      if (homesDirty) {
+        computeHomes(settings, sourcePoints, placeFrom);
+        homesDirty = false;
+        placeFrom = Number.POSITIVE_INFINITY;
+      } else if (settingsChanged) {
+        studio2d.refresh(particles);
+      }
+    } else {
+      homesDirty = false;
+      placeFrom = Number.POSITIVE_INFINITY;
+    }
 
     if (settings.playing) {
       const step = delta * 60;
@@ -617,12 +878,17 @@ export function startParticleEngine(
         populationAccumulator -= populationChange;
         if (settings.populationMode === "Grow") {
           for (let amount = 0; amount < populationChange && particles.length < settings.count; amount += 1) {
-            const particle: Particle = { x: 0, y: 0, vx: 0, vy: 0, age: 0, life: 0, size: 1, phase: 0, sourceColor: null, depth: 1, colorIndex: 0, morphAlpha: 1 };
+            const particle = newParticle(particles.length);
             spawn(particle, settings, sourcePoints, particles.length);
             particles.push(particle);
+            if (lockOn) {
+              homesDirty = true;
+              placeFrom = Math.min(placeFrom, particles.length - 1);
+            }
           }
         } else {
           particles.splice(Math.max(0, particles.length - populationChange), populationChange);
+          if (lockOn && populationChange > 0) homesDirty = true;
         }
       } else {
         populationAccumulator = 0;
@@ -682,11 +948,14 @@ export function startParticleEngine(
       const currentMorphForm = morphStage === "hold" || morphStage === "done"
         ? morphCurrentForm
         : morphStage === "initial" ? 0 : -1;
+      const motionEnabled = settings.motion !== "Off";
+      // Shape-Locked Motion keeps particles moving (and reacting to the pointer) even with Motion Off.
+      const alive = motionEnabled || lockOn;
+      const shocksOn = alive && studio2d.shockActive();
 
       for (let index = particles.length - 1; index >= 0; index -= 1) {
         const particle = particles[index];
-        const motionEnabled = settings.motion !== "Off";
-        if (motionEnabled && !morphing) {
+        if (motionEnabled && !morphing && !lockOn) {
           particle.age += delta;
           if (particle.age >= particle.life) {
             if (settings.populationMode === "Shrink") {
@@ -700,20 +969,27 @@ export function startParticleEngine(
         }
 
         if (morphing) {
-          const sourcePoints = morphForms[morphStep];
+          const sourceForm = morphForms[morphStep];
           const nextStep = morphStep + morphDirection;
           const targetStep = nextStep < 0 ? 0 : nextStep >= morphForms.length ? 0 : nextStep;
           const targetPoints = morphForms[targetStep];
-          const sourcePoint = sourcePoints[Math.floor((index * sourcePoints.length) / settings.count)];
+          const sourcePoint = sourceForm[Math.floor((index * sourceForm.length) / settings.count)];
           const targetPoint = targetPoints[Math.floor((index * targetPoints.length) / settings.count)];
           const scale = Math.min(width, height) * 0.72;
           const scatter = settings.svgMorphTurbulence / 100 * Math.sin(Math.PI * rawMorphProgress);
           const scatterDistance = settings.svgMorphType === "Scatter" ? scatter * Math.min(width, height) * 0.35 : 0;
           const directTurbulence = settings.svgMorphType === "Direct" ? scatter * 24 : 0;
-          particle.x = width * 0.5 + (sourcePoint.x + (targetPoint.x - sourcePoint.x) * morphProgress) * scale +
+          const baseX = width * 0.5 + (sourcePoint.x + (targetPoint.x - sourcePoint.x) * morphProgress) * scale;
+          const baseY = height * 0.5 + (sourcePoint.y + (targetPoint.y - sourcePoint.y) * morphProgress) * scale;
+          particle.x = baseX +
             Math.cos(particle.phase) * scatterDistance + Math.sin(time * 0.006 + particle.phase) * directTurbulence;
-          particle.y = height * 0.5 + (sourcePoint.y + (targetPoint.y - sourcePoint.y) * morphProgress) * scale +
+          particle.y = baseY +
             Math.sin(particle.phase) * scatterDistance + Math.cos(time * 0.005 + particle.phase * 1.7) * directTurbulence;
+          if (lockOn) {
+            // Keep the home following the morph so the spring takes over smoothly once it settles.
+            particle.targetX = baseX;
+            particle.targetY = baseY;
+          }
           particle.morphAlpha = settings.svgMorphType === "Dissolve"
             ? Math.abs(2 * rawMorphProgress - 1)
             : 1;
@@ -724,20 +1000,34 @@ export function startParticleEngine(
           particle.vy = 0;
           continue;
         }
+        let holdingForm = false;
         if (canMorph && currentMorphForm >= 0) {
           const formPoints = morphForms[currentMorphForm];
           const point = formPoints[Math.floor((index * formPoints.length) / settings.count)];
           const scale = Math.min(width, height) * 0.72;
-          particle.x = width * 0.5 + point.x * scale;
-          particle.y = height * 0.5 + point.y * scale;
+          const formX = width * 0.5 + point.x * scale;
+          const formY = height * 0.5 + point.y * scale;
           particle.morphAlpha = 1;
           particle.sourceColor = settings.preserveSvgColors ? point.color : null;
-          particle.vx = 0;
-          particle.vy = 0;
-          continue;
+          if (lockOn) {
+            // A held morph form is a formation like any other: lock to it and let it live.
+            particle.targetX = formX;
+            particle.targetY = formY;
+            holdingForm = true;
+          } else {
+            particle.x = formX;
+            particle.y = formY;
+            particle.vx = 0;
+            particle.vy = 0;
+            continue;
+          }
         }
-        particle.morphAlpha = 1;
+        if (!holdingForm) particle.morphAlpha = 1;
 
+        // Forces from the existing motion modes, physics and effects. While Shape Preservation
+        // is on they only get a small share (externalScale) so they cannot break the formation.
+        const forceVx = particle.vx;
+        const forceVy = particle.vy;
         if (motionEnabled && settings.physicsEnabled) {
           particle.vx *= settings.drag;
           particle.vy *= settings.drag;
@@ -764,9 +1054,16 @@ export function startParticleEngine(
         } else if (settings.motion === "Burst") {
           particle.vx *= 1 + 0.0005 * step;
           particle.vy *= 1 + 0.0005 * step;
+        } else if (settings.motion !== "Off") {
+          const acceleration = motionAcceleration(
+            settings.motion, MOTION_STYLES, particle.x, particle.y, time,
+            particle.phase, particle.seed, settings.speed, width, height,
+          );
+          particle.vx += acceleration.x * acceleration.force * step;
+          particle.vy += acceleration.y * acceleration.force * step;
         }
 
-        if (motionEnabled && settings.effects.includes("Magnetic Field") && pointer.active) {
+        if (alive && settings.effects.includes("Magnetic Field") && pointer.active) {
           const dx = pointer.x - particle.x;
           const dy = pointer.y - particle.y;
           const distance = Math.max(Math.hypot(dx, dy), 1);
@@ -777,24 +1074,32 @@ export function startParticleEngine(
           }
         }
 
-        if (motionEnabled && settings.interactive && pointer.active && settings.interaction !== "Off") {
+        if (lockOn) {
+          const external = studio2d.externalScale();
+          particle.vx = forceVx + (particle.vx - forceVx) * external;
+          particle.vy = forceVy + (particle.vy - forceVy) * external;
+        }
+
+        if (alive && settings.interactive && pointer.active && settings.interaction !== "Off") {
           const dx = pointer.x - particle.x;
           const dy = pointer.y - particle.y;
           const distance = Math.max(Math.hypot(dx, dy), 1);
           const reach = settings.interactionRadius;
           if (distance < reach) {
             const force = (1 - distance / reach) * settings.interactionStrength * step;
-            if (settings.interaction === "Repel") {
-              particle.vx -= (dx / distance) * force;
-              particle.vy -= (dy / distance) * force;
-            } else if (settings.interaction === "Attract") {
-              particle.vx += (dx / distance) * force;
-              particle.vy += (dy / distance) * force;
-            } else {
-              particle.vx += (-dy / distance) * force;
-              particle.vy += (dx / distance) * force;
-            }
+            const response = touchForce(
+              settings.interaction, TOUCH_BEHAVIORS, dx, dy, distance, time, particle.phase, particle.seed,
+            );
+            particle.vx += response.x * force * response.scale;
+            particle.vy += response.y * force * response.scale;
           }
+        }
+        if (shocksOn) studio2d.applyShocks(particle);
+
+        if (lockOn) {
+          // Damped spring back to the home position + bounded organic wobble.
+          studio2d.lockStep(particle, delta);
+          continue;
         }
 
         if (motionEnabled) {
@@ -874,14 +1179,46 @@ export function startParticleEngine(
       }
       context.globalAlpha = 1;
     }
+
+    // Advanced backdrop, visible beam haze, free dust and the rings behind the formation.
+    studio2d.drawBackdrop(context, showTrails);
+    studio2d.drawHaze(context);
+    studio2d.drawDust(context);
+    studio2d.drawRings(context, false);
+
     context.globalCompositeOperation = "lighter";
     drawNetwork(settings);
     drawConnections(settings);
     if (settings.generator !== "Source Shape" ||
         (settings.emitter !== "SVG" || svgPoints.length > 0) &&
         (settings.emitter !== "Designer" || designerPoints.length > 0)) {
-      for (const particle of particles) drawParticle(particle, settings, showTrails ? 0.85 : 1, time);
+      const flags: DrawFlags = {
+        lock: lockOn,
+        gradient: studio2d.gradientActive(),
+        light: studio2d.lightActive(),
+        bokeh: studio2d.bokeh(),
+        glints: studio.fx.glints,
+        extraEffects: settings.effects
+          .map((effect) => availableEffects.findIndex((item) => item.id === effect))
+          .filter((index) => index >= 7)
+          .slice(0, 6),
+      };
+      const style = `${settings.shape}:${settings.customShapePath}:${settings.glow}:${settings.size}:${settings.color}:${settings.accent}:${settings.volumeLook}`;
+      if (style !== spriteStyle) {
+        spriteStyle = style;
+        spriteCache.clear();
+      }
+      for (const particle of particles) drawParticle(particle, settings, showTrails ? 0.85 : 1, time, flags);
     }
+    context.globalCompositeOperation = "source-over";
+    context.globalAlpha = 1;
+
+    studio2d.drawGlints(context);
+    studio2d.drawRings(context, true);
+    studio2d.drawShocks(context);
+    studio2d.drawGuides(context);
+    studio2d.post(context, canvas, showTrails);
+    context.globalAlpha = 1;
     context.globalCompositeOperation = "source-over";
 
     fpsFrames += 1;
@@ -899,15 +1236,25 @@ export function startParticleEngine(
     pointer.y = event.clientY - bounds.top;
     pointer.active = true;
   };
+  const startPointer = (event: PointerEvent) => {
+    updatePointer(event);
+    studio2d.addShock(pointer.x, pointer.y);
+  };
   const stopPointer = () => {
     pointer.active = false;
+  };
+  // A lifted finger should release the particles so Shape-Locked Motion can recover.
+  const releaseTouch = (event: PointerEvent) => {
+    if (event.pointerType !== "mouse") stopPointer();
   };
 
   const observer = new ResizeObserver(resize);
   observer.observe(canvas);
   canvas.addEventListener("pointermove", updatePointer);
-  canvas.addEventListener("pointerdown", updatePointer);
+  canvas.addEventListener("pointerdown", startPointer);
   canvas.addEventListener("pointerleave", stopPointer);
+  canvas.addEventListener("pointerup", releaseTouch);
+  canvas.addEventListener("pointercancel", stopPointer);
   resize();
   animationId = window.requestAnimationFrame(animate);
 
@@ -915,7 +1262,9 @@ export function startParticleEngine(
     window.cancelAnimationFrame(animationId);
     observer.disconnect();
     canvas.removeEventListener("pointermove", updatePointer);
-    canvas.removeEventListener("pointerdown", updatePointer);
+    canvas.removeEventListener("pointerdown", startPointer);
     canvas.removeEventListener("pointerleave", stopPointer);
+    canvas.removeEventListener("pointerup", releaseTouch);
+    canvas.removeEventListener("pointercancel", stopPointer);
   };
 }

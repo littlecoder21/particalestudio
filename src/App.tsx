@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   startParticleEngine,
+  MAX_PARTICLES,
   type Emitter,
   type Interaction,
   type Motion,
@@ -14,7 +15,6 @@ import {
 import { additionalPresets } from "./additionalPresets";
 import { generatorLibrary, type GeneratorCategory } from "./generators";
 import { availableEffects, isParticleEffect, type ParticleEffect } from "./effects";
-import { generateCodeExport } from "./codeExport";
 import { readDesignerLibrary, sampleGeometry, validateGeometryDocument, type GeometryDocument } from "./geometry/model";
 import {
   parseSvgSource,
@@ -24,8 +24,23 @@ import {
   type SvgSamplingMode,
   type SvgSource,
 } from "./svgSource";
+import { generateStudioExport } from "./studio2d/exportStudio";
+import { useDockSheet } from "./studio2d/dock";
+import { BackdropControls, BeamHandles, FxPanel, LibraryPanel, LightPanel, ShapeLockPanel } from "./studio2d/panels";
+import { studio2dPresets, type StudioPreset } from "./studio2d/presets";
+import { findLibraryShape } from "./studio2d/shapes";
+import {
+  defaultStudio2D,
+  normalizeStudio2D,
+  patchStudio2D,
+  type Studio2DPatch,
+} from "./studio2d/types";
+import { MOTION_OPTIONS, TOUCH_BEHAVIORS } from "./studio2d/catalogs";
+import "./studio2d/studio2d.css";
 
-type SectionId = "presets" | "create" | "generator" | "effects" | "motion" | "physics" | "look" | "background" | "touch" | "export";
+type SectionId =
+  | "presets" | "create" | "library" | "generator" | "motion" | "lock" | "effects" | "light" | "fx"
+  | "physics" | "look" | "background" | "touch" | "export";
 
 const initialSettings: ParticleSettings = {
   count: 420,
@@ -74,6 +89,22 @@ const initialSettings: ParticleSettings = {
   trails: false,
   interactive: true,
   playing: true,
+  volumeLook: false,
+  studio: defaultStudio2D(),
+};
+
+type PresetEntry = {
+  name: string;
+  tag: string;
+  color: string;
+  accent: string;
+  settings: Partial<ParticleSettings>;
+  /** Studio 2D behaviour (Shape-Locked Motion, light, FX, backdrop) to apply with the preset. */
+  studio?: Studio2DPatch;
+  /** true: start from default studio settings; false/undefined: patch what is already set. */
+  replaceStudio?: boolean;
+  /** Built-in library shape to load as the particle source. */
+  shape?: string;
 };
 
 const presets: Array<{ name: string; tag: string; color: string; accent: string; settings: Partial<ParticleSettings> }> = [
@@ -113,7 +144,7 @@ const presets: Array<{ name: string; tag: string; color: string; accent: string;
     settings: { count: 220, emitter: "Line", motion: "Flow", spread: 86, speed: 0.8, size: 1.6, glow: 5, gravity: 0.035 },
   },
 ];
-const allPresets = [...presets, ...additionalPresets];
+const allPresets: PresetEntry[] = [...presets, ...additionalPresets, ...studio2dPresets as StudioPreset[]];
 
 function isValidCustomShapePath(value: unknown): value is string {
   if (typeof value !== "string" || value.length > 2000 || !value.trim()) return false;
@@ -134,13 +165,13 @@ function isParticleSettings(value: unknown): value is ParticleSettings {
     typeof candidate[key] === "string" && options.includes(candidate[key]);
 
   return (
-    inRange("count", 80, 1200) &&
+    inRange("count", 80, MAX_PARTICLES) &&
     isOneOf("emitter", ["Point", "Circle", "Ring", "Line", "Fountain", "SVG", "Designer"]) &&
     isOneOf("generator", ["Source Shape", ...generatorLibrary.flatMap((group) => group.generators)]) &&
     Array.isArray(candidate.effects) && candidate.effects.every(isParticleEffect) &&
-    isOneOf("motion", ["Off", "Float", "Orbit", "Flow", "Burst"]) &&
+    isOneOf("motion", MOTION_OPTIONS) &&
     isOneOf("shape", ["Circle", "Square", "Diamond", "Star", "Triangle", "Pentagon", "Hexagon", "Polygon", "Heart", "Sparkle", "Ring", "Cross", "Custom"]) &&
-    isOneOf("interaction", ["Repel", "Attract", "Swirl", "Off"]) &&
+    isOneOf("interaction", [...TOUCH_BEHAVIORS, "Off"]) &&
     typeof candidate.color === "string" && /^#[\da-f]{6}$/i.test(candidate.color) &&
     typeof candidate.accent === "string" && /^#[\da-f]{6}$/i.test(candidate.accent) &&
     Array.isArray(candidate.palette) && candidate.palette.length >= 2 && candidate.palette.length <= 8 &&
@@ -181,7 +212,9 @@ function isParticleSettings(value: unknown): value is ParticleSettings {
     typeof candidate.physicsEnabled === "boolean" &&
     typeof candidate.trails === "boolean" &&
     typeof candidate.interactive === "boolean" &&
-    typeof candidate.playing === "boolean"
+    (candidate.volumeLook === undefined || typeof candidate.volumeLook === "boolean") &&
+    typeof candidate.playing === "boolean" &&
+    (candidate.studio === undefined || (typeof candidate.studio === "object" && candidate.studio !== null))
   );
 }
 
@@ -248,6 +281,8 @@ function readSavedProject(): {
     if (!project.settings || typeof project.settings !== "object") throw new Error("Saved particle settings are invalid.");
     const settings = { ...initialSettings, ...(project.settings as Partial<ParticleSettings>) };
     if (!Array.isArray(settings.palette)) settings.palette = [settings.color, settings.accent];
+    // Older projects have no Studio 2D data: they get the defaults (everything off).
+    settings.studio = normalizeStudio2D((project.settings as Record<string, unknown>).studio);
     if (!isParticleSettings(settings)) throw new Error("Saved particle settings are invalid.");
     const svgSources = restoreSvgSources(project.svgSources);
     if (svgSources.length === 0) {
@@ -290,9 +325,13 @@ function readSavedProject(): {
 const sections: Array<{ id: SectionId; label: string; icon: string; hint: string }> = [
   { id: "presets", label: "Presets", icon: "✦", hint: "Ready-made looks" },
   { id: "create", label: "Create", icon: "✳", hint: "Source & amount" },
+  { id: "library", label: "Shapes", icon: "❖", hint: "SVG shape library" },
   { id: "generator", label: "Generate", icon: "✺", hint: "Formation library" },
-  { id: "effects", label: "Effects", icon: "✧", hint: "Add visual effects" },
   { id: "motion", label: "Motion", icon: "↗", hint: "Movement styles" },
+  { id: "lock", label: "Lock", icon: "◈", hint: "Shape-locked motion" },
+  { id: "effects", label: "Effects", icon: "✧", hint: "Add visual effects" },
+  { id: "light", label: "Light", icon: "☀", hint: "Light on particles" },
+  { id: "fx", label: "FX", icon: "❂", hint: "Color, rings & glow" },
   { id: "physics", label: "Physics", icon: "◌", hint: "Forces & bounce" },
   { id: "look", label: "Look", icon: "◉", hint: "Color & style" },
   { id: "background", label: "Scene", icon: "▧", hint: "Light & backdrop" },
@@ -367,6 +406,27 @@ function ChoiceGroup<T extends string>({
   );
 }
 
+function SelectControl<T extends string>({
+  label,
+  options,
+  value,
+  onChange,
+}: {
+  label: string;
+  options: readonly T[];
+  value: T;
+  onChange: (value: T) => void;
+}) {
+  return (
+    <label className="svg-select-control">
+      <span>{label}</span>
+      <select aria-label={label} value={value} onChange={(event) => onChange(event.currentTarget.value as T)}>
+        {options.map((option) => <option key={option} value={option}>{option}</option>)}
+      </select>
+    </label>
+  );
+}
+
 function App() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const svgInputRef = useRef<HTMLInputElement>(null);
@@ -414,12 +474,15 @@ function App() {
   const [recordFps, setRecordFps] = useState(30);
   const [recordProgress, setRecordProgress] = useState(0);
   const [customPathError, setCustomPathError] = useState("");
+  const [selectedBeam, setSelectedBeam] = useState(0);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const recordTimeoutRef = useRef<number | null>(null);
   const recordIntervalRef = useRef<number | null>(null);
   const recordStartedAtRef = useRef(0);
+  const dock = useDockSheet(menuOpen, setMenuOpen);
+  const studio = settings.studio ?? defaultStudio2D();
   const generatedCode = useMemo(
-    () => generateCodeExport(settings, svgPoints, svgSequencePoints, designerPoints),
+    () => generateStudioExport(settings, svgPoints, svgSequencePoints, designerPoints),
     [settings, svgPoints, svgSequencePoints, designerPoints],
   );
 
@@ -570,6 +633,13 @@ function App() {
     setIsSaved(false);
   };
 
+  /** Change Studio 2D settings (Shape-Locked Motion, light, FX, backdrop). */
+  const updateStudio = (patch: Studio2DPatch) => {
+    setSettings((current) => ({ ...current, studio: patchStudio2D(current.studio ?? defaultStudio2D(), patch) }));
+    setActivePreset("");
+    setIsSaved(false);
+  };
+
   const updateSvgSource = <K extends "selectedPath" | "mode" | "distribution" | "spacing">(
     key: K,
     value: SvgSource[K],
@@ -638,18 +708,61 @@ function App() {
     setIsSaved(false);
   };
 
+  /**
+   * Load one of the built-in SVG shapes as the particle source. The shape goes through the
+   * normal SVG pipeline (same as an imported file). Returns false if it could not be loaded.
+   */
+  const loadLibraryShape = (shapeId: string, raiseCount = true): boolean => {
+    const shape = findLibraryShape(shapeId);
+    if (!shape) return false;
+    const existing = svgSources.findIndex((source) => source.name === shape.name);
+    if (existing >= 0) {
+      setActiveSvgIndex(existing);
+    } else {
+      try {
+        const source = parseSvgSource(shape.markup, shape.name);
+        source.mode = shape.mode;
+        source.distribution = shape.distribution;
+        setSvgSources((current) => [...current, source]);
+        setActiveSvgIndex(svgSources.length);
+      } catch (error) {
+        setSvgError(error instanceof Error ? error.message : "Could not load this shape.");
+        return false;
+      }
+    }
+    setSvgError("");
+    setSettings((current) => ({
+      ...current,
+      emitter: "SVG",
+      generator: "Source Shape",
+      preserveSvgColors: true,
+      // Dense shapes need enough particles to stay recognisable; never lower the user's count.
+      count: raiseCount ? Math.max(current.count, Math.min(shape.count, MAX_PARTICLES)) : current.count,
+    }));
+    setIsSaved(false);
+    return true;
+  };
+
   const applyPreset = (name: string) => {
     const preset = allPresets.find((item) => item.name === name);
     if (!preset) return;
     setActivePreset(name);
-    setSettings((current) => ({
-      ...current,
-      ...preset.settings,
-      color: preset.color,
-      accent: preset.accent,
-      palette: preset.settings.palette ?? [preset.color, preset.accent],
-      generator: preset.settings.generator ?? "Source Shape",
-    }));
+    if (preset.shape) loadLibraryShape(preset.shape, false);
+    setSettings((current) => {
+      // Classic presets are complete looks, so they switch Studio 2D features off again.
+      // Shape-lock presets only patch their own group and leave everything else as it is.
+      const patchOnly = preset.studio !== undefined && !preset.replaceStudio;
+      const baseStudio = patchOnly ? current.studio ?? defaultStudio2D() : defaultStudio2D();
+      return {
+        ...current,
+        ...preset.settings,
+        color: patchOnly ? current.color : preset.color,
+        accent: patchOnly ? current.accent : preset.accent,
+        palette: preset.settings.palette ?? (patchOnly ? current.palette : [preset.color, preset.accent]),
+        generator: preset.settings.generator ?? (preset.shape || !patchOnly ? "Source Shape" : current.generator),
+        studio: patchStudio2D(baseStudio, preset.studio ?? {}),
+      };
+    });
     setIsSaved(false);
   };
 
@@ -701,7 +814,7 @@ function App() {
   };
 
   const downloadConfig = () => {
-    const blob = new Blob([JSON.stringify({ version: 7, preset: activePreset, settings, svgSources, activeSvgIndex, morphSequence, designerDocument }, null, 2)], {
+    const blob = new Blob([JSON.stringify({ version: 8, preset: activePreset, settings, svgSources, activeSvgIndex, morphSequence, designerDocument }, null, 2)], {
       type: "application/json",
     });
     const url = URL.createObjectURL(blob);
@@ -1067,16 +1180,30 @@ function App() {
               }}
             />
             <p className="field-help">Choose <b>Use source shape</b> in the Generator section to use the selected formation. Designer source: <b>{designerDocument.name}</b>.</p>
-            <RangeControl label="Particle count" value={settings.count} min={80} max={1200} step={20} onChange={(value) => update("count", value)} />
+            <RangeControl label="Particle count" value={settings.count} min={80} max={MAX_PARTICLES} step={20} onChange={(value) => update("count", value)} />
             <RangeControl label="Spread" value={settings.spread} min={10} max={100} step={1} suffix="%" onChange={(value) => update("spread", value)} />
           </div>
+        );
+      case "library":
+        return (
+          <LibraryPanel
+            activeName={settings.emitter === "SVG" ? svgSource?.name ?? "" : ""}
+            count={settings.count}
+            onUse={(id) => {
+              if (loadLibraryShape(id)) {
+                setActivePreset("");
+                setNotice(`${findLibraryShape(id)?.name ?? "Shape"} loaded`);
+              }
+            }}
+            onImport={() => svgInputRef.current?.click()}
+          />
         );
       case "generator":
         return (
           <div className="section-content">
             <div className="control-heading">
               <div><h2>Choose a formation engine</h2><p>Build a starting layout from geometry, patterns, nature or 3D space.</p></div>
-              <span className="section-number">03</span>
+              <span className="section-number">04</span>
             </div>
             <button
               type="button"
@@ -1121,7 +1248,7 @@ function App() {
           <div className="section-content">
             <div className="control-heading">
               <div><h2>Compose your effects</h2><p>Add or remove effects independently. Stack several for a custom finish.</p></div>
-              <span className="section-number">04</span>
+              <span className="section-number">07</span>
             </div>
             <div className="effects-toolbar">
               <span>{settings.effects.length} of {availableEffects.length} active</span>
@@ -1129,6 +1256,7 @@ function App() {
                 <button type="button" className="text-action" onClick={() => update("effects", [])}>Clear all</button>
               )}
             </div>
+            <p className="field-help">Choose from 50 effects. Up to 6 can be active together to keep the preview responsive.</p>
             <div className="effects-list">
               {availableEffects.map((effect) => {
                 const added = settings.effects.includes(effect.id);
@@ -1141,6 +1269,7 @@ function App() {
                       className={`effect-action ${added ? "added" : ""}`}
                       aria-label={`${added ? "Remove" : "Add"} ${effect.id} effect`}
                       aria-pressed={added}
+                      disabled={!added && settings.effects.length >= 6}
                       onClick={() => update(
                         "effects",
                         added
@@ -1164,22 +1293,31 @@ function App() {
               <div><h2>Give it some movement</h2><p>Shape how your particles travel.</p></div>
               <span className="section-number">05</span>
             </div>
-            <ChoiceGroup<Motion>
-              label="Motion style"
-              options={["Off", "Float", "Orbit", "Flow", "Burst"]}
+            <SelectControl<Motion>
+              label={`Motion style · ${MOTION_OPTIONS.length - 1} styles`}
+              options={MOTION_OPTIONS}
               value={settings.motion}
               onChange={(value) => update("motion", value)}
             />
             <RangeControl label="Speed" value={settings.speed} min={0.2} max={4} step={0.1} onChange={(value) => update("speed", value)} />
+            {studio.shapeLock.enabled && (
+              <div className="soft-tip"><span>◈</span><p><b>Shape-Locked Motion is on.</b> Motion styles only get a small share of their force so the formation keeps its outline. Tune it in the <b>Lock</b> tab.</p></div>
+            )}
             <div className="soft-tip"><span>✦</span><p><b>Motion Off</b> restores the source layout and keeps every particle in place. Use the preview pause button to freeze the current animation instead.</p></div>
           </div>
         );
+      case "lock":
+        return <ShapeLockPanel studio={studio} onPatch={updateStudio} motion={settings.motion} />;
+      case "light":
+        return <LightPanel studio={studio} onPatch={updateStudio} selectedBeam={selectedBeam} onSelectBeam={setSelectedBeam} />;
+      case "fx":
+        return <FxPanel studio={studio} onPatch={updateStudio} trails={settings.trails || settings.effects.includes("Long Exposure")} />;
       case "physics":
         return (
           <div className="section-content">
             <div className="control-heading">
               <div><h2>Shape the physics</h2><p>Control forces, canvas edges and particle population.</p></div>
-              <span className="section-number">06</span>
+              <span className="section-number">10</span>
             </div>
             <ChoiceGroup<BoundsMode>
               label="Canvas edge behavior"
@@ -1219,7 +1357,7 @@ function App() {
           <div className="section-content">
             <div className="control-heading">
               <div><h2>Make it yours</h2><p>Build a multi-color particle palette and shape details.</p></div>
-              <span className="section-number">07</span>
+              <span className="section-number">11</span>
             </div>
             <div className="palette-list">
               {settings.palette.map((color, index) => (
@@ -1243,7 +1381,7 @@ function App() {
               const nextColor = ["#ff8c62", "#9bea6c", "#a9eaff", "#f47bd8", "#ffe45e", "#45f3ef"][settings.palette.length - 2];
               update("palette", [...settings.palette, nextColor]);
             }}>＋ Add palette color {settings.palette.length >= 8 ? "(8 max)" : ""}</button>
-            <p className="field-help">Particles cycle smoothly through this palette; individual particles start at different colors.</p>
+            <p className="field-help">Particles cycle smoothly through this palette; individual particles start at different colors. Use <b>FX → Color mapping</b> to spread the palette across the shape as a gradient.</p>
             <button type="button" className={`toggle-row ${settings.preserveSvgColors ? "enabled" : ""}`} onClick={() => update("preserveSvgColors", !settings.preserveSvgColors)} aria-pressed={settings.preserveSvgColors}>
               <span><b>Preserve imported SVG colors</b><small>Turn off to recolor imported shapes with your palette</small></span><i className="toggle-switch" />
             </button>
@@ -1256,6 +1394,9 @@ function App() {
                 update("shape", value);
               }}
             />
+            <button type="button" className={`toggle-row ${settings.volumeLook ? "enabled" : ""}`} onClick={() => update("volumeLook", !settings.volumeLook)} aria-pressed={settings.volumeLook}>
+              <span><b>3D particle finish</b><small>Shade particles with rounded highlights and depth; the canvas remains 2D</small></span><i className="toggle-switch" />
+            </button>
             {settings.shape === "Custom" && (
               <label className="path-editor">
                 <span className="control-label">Custom SVG path data <small>Use a 0–100 viewBox</small></span>
@@ -1293,7 +1434,7 @@ function App() {
           <div className="section-content">
             <div className="control-heading">
               <div><h2>Set the scene</h2><p>Build a backdrop with color, light and grid.</p></div>
-              <span className="section-number">08</span>
+              <span className="section-number">12</span>
             </div>
             <ChoiceGroup<ParticleSettings["backgroundMode"]>
               label="Background mode"
@@ -1312,6 +1453,8 @@ function App() {
             <button type="button" className={`toggle-row ${settings.showGrid ? "enabled" : ""}`} onClick={() => update("showGrid", !settings.showGrid)} aria-pressed={settings.showGrid}>
               <span><b>Overlay grid</b><small>Show a subtle alignment grid on the canvas</small></span><i className="toggle-switch" />
             </button>
+            <div className="control-divider" />
+            <BackdropControls studio={studio} onPatch={updateStudio} trails={settings.trails || settings.effects.includes("Long Exposure")} />
           </div>
         );
       case "touch":
@@ -1319,14 +1462,14 @@ function App() {
           <div className="section-content">
             <div className="control-heading">
               <div><h2>Play with your particles</h2><p>Move your finger or pointer over the canvas.</p></div>
-              <span className="section-number">09</span>
+              <span className="section-number">13</span>
             </div>
             <button type="button" className={`toggle-row ${settings.interactive ? "enabled" : ""}`} onClick={() => update("interactive", !settings.interactive)} aria-pressed={settings.interactive}>
               <span><b>Touch interaction</b><small>Let particles respond to your touch</small></span><i className="toggle-switch" />
             </button>
-            <ChoiceGroup<Interaction>
-              label="Touch behavior"
-              options={["Repel", "Attract", "Swirl", "Off"]}
+            <SelectControl<Interaction>
+              label={`Touch behavior · ${TOUCH_BEHAVIORS.length} styles`}
+              options={[...TOUCH_BEHAVIORS, "Off"] as const}
               value={settings.interaction}
               onChange={(value) => update("interaction", value)}
             />
@@ -1334,7 +1477,7 @@ function App() {
             <RangeControl label="Touch strength" value={settings.interactionStrength} min={0.05} max={1.5} step={0.05} onChange={(value) => update("interactionStrength", value)} />
             <div className="interaction-card">
               <span className="interaction-icon">✳</span>
-              <div><b>Go ahead, try it</b><p>Touch and drag across the preview to shape the motion in real time.</p></div>
+              <div><b>Go ahead, try it</b><p>Touch and drag across the preview to shape the motion in real time. With Shape-Locked Motion on, particles spring back to their shape when you let go.</p></div>
             </div>
           </div>
         );
@@ -1343,7 +1486,7 @@ function App() {
           <div className="section-content">
             <div className="control-heading">
               <div><h2>Take it with you</h2><p>Export runnable code or record a video.</p></div>
-              <span className="section-number">10</span>
+              <span className="section-number">14</span>
             </div>
             <div className="export-card">
               <div className="export-card-heading"><b>Particle code</b><small>Self-contained HTML or separate project files.</small></div>
@@ -1383,6 +1526,15 @@ function App() {
     }
   };
 
+  // Keep the active tab visible in the horizontally scrolling tab strip.
+  useEffect(() => {
+    if (!menuOpen) return;
+    document.querySelector(".s2-dock .section-tab.active")?.scrollIntoView({ block: "nearest", inline: "center", behavior: "smooth" });
+  }, [activeSection, menuOpen]);
+
+  const activePresetName = allPresets.find((preset) => preset.name === activePreset)?.name ?? "Custom effect";
+  const activeSectionLabel = sections.find((section) => section.id === activeSection)?.label ?? "";
+
   return (
     <main className="studio">
       <header className="topbar">
@@ -1397,7 +1549,7 @@ function App() {
         </div>
       </header>
 
-      <div className="workspace">
+      <div className="workspace s2-workspace">
         <section className="preview-area" aria-label="Particle preview">
           <div className="preview-head">
             <div><span className="eyebrow">YOUR CANVAS</span><span className="canvas-name">Untitled creation</span></div>
@@ -1410,17 +1562,27 @@ function App() {
           <div className={`canvas-wrap ${settings.backgroundMode === "Transparent" ? "transparent-background" : ""}`}>
             <canvas ref={canvasRef} aria-label="Interactive particle animation" />
             <div className="canvas-glow" />
+            <BeamHandles
+              active={activeSection === "light" && studio.light.enabled && studio.light.showGuide}
+              studio={studio}
+              onPatch={updateStudio}
+              selectedBeam={selectedBeam}
+              onSelectBeam={setSelectedBeam}
+            />
             <div className="canvas-caption"><span className="pulse-dot" />LIVE PREVIEW <span className="caption-divider">·</span> DRAG TO PLAY</div>
-            <button type="button" className={`collapse-floating ${menuOpen ? "menu-open" : ""}`} onClick={() => setMenuOpen((open) => !open)} aria-expanded={menuOpen}>
-              <span>{menuOpen ? "↓" : "↑"}</span>{menuOpen ? "Hide controls" : "Make something"}
-            </button>
           </div>
           <div className="preview-footer"><span><kbd>✦</kbd> A little universe, all yours.</span><span className="preview-dimensions">LIVE CANVAS <i /> {particleCount} PARTICLES</span></div>
         </section>
 
-        <aside className={`control-dock ${menuOpen ? "open" : "collapsed"}`} aria-label="Particle controls">
-          <div className="dock-handle" onClick={() => setMenuOpen((open) => !open)} role="button" tabIndex={0} aria-label={menuOpen ? "Collapse controls" : "Expand controls"} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") setMenuOpen((open) => !open); }}>
-            <span />
+        <aside
+          className={`control-dock s2-dock ${menuOpen ? "open" : "collapsed"} ${dock.dragging ? "dragging" : ""}`}
+          style={dock.style}
+          aria-label="Particle controls"
+        >
+          <div className="s2-dock-bar" {...dock.barProps}>
+            <span className="s2-dock-grip" />
+            <span className="s2-dock-label"><b>{activePresetName}</b><small>{activeSectionLabel} · {particleCount} particles</small></span>
+            <span className="s2-dock-chevron" aria-hidden="true">{menuOpen ? "⌄" : "⌃"}</span>
           </div>
           <div className="dock-topline">
             <div><span className="eyebrow">THE FUN PART</span><h1>Make it move<span>.</span></h1></div>
@@ -1428,7 +1590,7 @@ function App() {
           </div>
           {menuOpen && (
             <>
-              <nav className="section-tabs" aria-label="Control sections">
+              <nav className="section-tabs s2-tabs" aria-label="Control sections">
                 {sections.map((section) => (
                   <button
                     type="button"
@@ -1452,7 +1614,7 @@ function App() {
           )}
           {!menuOpen && (
             <button type="button" className="collapsed-summary" onClick={() => setMenuOpen(true)}>
-              <span className="summary-sparkle">✦</span><span><b>{allPresets.find((preset) => preset.name === activePreset)?.name ?? "Custom effect"}</b><small>{sections.find((section) => section.id === activeSection)?.label} controls · {particleCount} particles</small></span><span className="summary-arrow">↑</span>
+              <span className="summary-sparkle">✦</span><span><b>{activePresetName}</b><small>{activeSectionLabel} controls · {particleCount} particles</small></span><span className="summary-arrow">↑</span>
             </button>
           )}
         </aside>

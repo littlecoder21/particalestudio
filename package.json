@@ -8,6 +8,7 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "test:3d": "tsx --test tests/studio3d/*.test.ts",
+    "test:2d": "tsx --test tests/studio2d/*.test.ts",
     "test:export:browser": "tsx tools/export-browser-tests/run.ts",
     "test:export:ui": "tsx tools/export-browser-tests/ui.ts",
     "test:export:parity": "tsx tools/export-browser-tests/parity.ts"

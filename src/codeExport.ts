@@ -1,6 +1,8 @@
 import type { ParticleSettings } from "./particleEngine";
 import type { SvgSamplePoint } from "./svgSource";
 import { getGeneratorPoint } from "./generators";
+import { availableEffects } from "./effects";
+import { motionAcceleration, MOTION_STYLES, TOUCH_BEHAVIORS, touchForce } from "./studio2d/catalogs";
 
 export interface CodeExportFiles {
   html: string;
@@ -20,6 +22,10 @@ export function generateCodeExport(
     emitter: settings.emitter,
     generator: settings.generator,
     effects: settings.effects,
+    extraEffects: settings.effects.map((effect) => availableEffects.findIndex((item) => item.id === effect)).filter((index) => index >= 7).slice(0, 6),
+    extraEffectStyles: availableEffects.slice(7).map((effect) => effect.style),
+    motionStyles: MOTION_STYLES,
+    touchBehaviors: TOUCH_BEHAVIORS,
     motion: settings.motion,
     shape: settings.shape,
     color: settings.color,
@@ -53,6 +59,7 @@ export function generateCodeExport(
     interactive: settings.interactive,
     playing: settings.playing,
     glow: settings.glow,
+    volumeLook: settings.volumeLook ?? false,
     opacity: settings.opacity,
     trails: settings.trails,
     showGrid: settings.showGrid,
@@ -73,6 +80,8 @@ canvas { display: block; width: 100%; height: 100%; touch-action: none; }
 `;
 
   const javascript = `const CONFIG = ${config};
+  const motionAcceleration = ${motionAcceleration.toString()};
+  const touchForce = ${touchForce.toString()};
 const getGeneratorPoint = ${getGeneratorPoint.toString()};
 const canvas = document.querySelector("canvas");
 const context = canvas.getContext("2d", { alpha: CONFIG.backgroundMode === "Transparent" });
@@ -310,6 +319,7 @@ function makeParticle(index = Math.floor(Math.random() * Math.max(CONFIG.count, 
     age: CONFIG.motion === "Off" ? 0 : random(0, 4),
     life: random(2.2, 6),
     phase: random(0, Math.PI * 2),
+    seed: ((index * 0.618033988749895) % 1 + 1) % 1,
     size: random(.55, 1.45),
     sourceColor: null,
     palette: getPalette(CONFIG.color, index),
@@ -410,7 +420,7 @@ function drawShape(target, x, y, size) {
 }
 
 function getSprite(color, size) {
-  const key = color + ":" + size;
+  const key = color + ":" + size + ":" + CONFIG.volumeLook;
   let sprite = spriteCache.get(key);
   if (sprite) return sprite;
   if (spriteCache.size >= maxSprites) spriteCache.delete(spriteCache.keys().next().value);
@@ -426,6 +436,18 @@ function getSprite(color, size) {
   spriteContext.shadowColor = color;
   spriteContext.shadowBlur = CONFIG.glow;
   drawShape(spriteContext, dimension / 2, dimension / 2, size);
+  if (CONFIG.volumeLook) {
+    spriteContext.save();
+    spriteContext.globalCompositeOperation = "source-atop";
+    const highlight = spriteContext.createRadialGradient(dimension * .34, dimension * .32, 0, dimension * .5, dimension * .5, size * 1.65);
+    highlight.addColorStop(0, "rgba(255,255,255,.9)");
+    highlight.addColorStop(.18, "rgba(255,255,255,.3)");
+    highlight.addColorStop(.62, "rgba(255,255,255,0)");
+    highlight.addColorStop(1, "rgba(4,8,24,.72)");
+    spriteContext.fillStyle = highlight;
+    spriteContext.fillRect(0, 0, dimension, dimension);
+    spriteContext.restore();
+  }
   spriteCache.set(key, sprite);
   return sprite;
 }
@@ -466,6 +488,51 @@ function drawParticle(particle, motionEnabled) {
     context.closePath();
     context.fill();
   }
+  for (const effectIndex of CONFIG.extraEffects) {
+    const profile = effectIndex - 7, family = CONFIG.extraEffectStyles[profile], variation = Math.floor(profile / 10);
+    const phase = previous * (.0012 + variation * .00028) + particle.phase + particle.seed * 8;
+    const radius = Math.max(1.5, size * (0.9 + variation * .16));
+    context.save();
+    context.globalAlpha = Math.min(.8, fade * twinkle * CONFIG.opacity * (0.24 + variation * .07) * (family === 4 ? .65 + .35 * Math.sin(phase * .7) : 1));
+    context.strokeStyle = color; context.fillStyle = color; context.lineWidth = Math.max(.55, size * .13);
+    context.beginPath();
+    if (family === 0 || family === 5) {
+      context.arc(particle.x, particle.y, radius * (1.15 + .25 * Math.sin(phase)), 0, Math.PI * 2); context.stroke();
+    } else if (family === 1) {
+      const orbit = phase + family * .7, orbitRadius = radius * (1.2 + variation * .12);
+      context.arc(particle.x + Math.cos(orbit) * orbitRadius, particle.y + Math.sin(orbit) * orbitRadius, Math.max(.7, radius * .2), 0, Math.PI * 2); context.fill();
+    } else if (family === 2) {
+      const offset = radius * (.28 + variation * .08);
+      context.arc(particle.x - offset, particle.y, Math.max(.5, radius * .42), 0, Math.PI * 2);
+      context.arc(particle.x + offset, particle.y, Math.max(.5, radius * .42), 0, Math.PI * 2); context.fill();
+    } else if (family === 3) {
+      const flare = radius * (.7 + .2 * Math.sin(phase * 2));
+      context.moveTo(particle.x - flare, particle.y); context.lineTo(particle.x + flare, particle.y);
+      context.moveTo(particle.x, particle.y - flare); context.lineTo(particle.x, particle.y + flare); context.stroke();
+    } else if (family === 4) {
+      const halo = radius * (1 + particle.depth * .18);
+      context.ellipse(particle.x, particle.y, halo, halo * .72, phase, 0, Math.PI * 2); context.stroke();
+    } else if (family === 6) {
+      const trail = radius * (1 + variation * .35);
+      context.moveTo(particle.x, particle.y); context.lineTo(particle.x - particle.vx * trail, particle.y - particle.vy * trail); context.stroke();
+    } else if (family === 7) {
+      const glint = radius * (.3 + variation * .08);
+      context.moveTo(particle.x - glint, particle.y); context.lineTo(particle.x + glint, particle.y);
+      context.moveTo(particle.x, particle.y - glint); context.lineTo(particle.x, particle.y + glint); context.stroke();
+    } else if (family === 8) {
+      const wave = radius * .7;
+      context.moveTo(particle.x - wave, particle.y);
+      for (let point = 1; point <= 6; point++) {
+        const x = particle.x - wave + point / 6 * wave * 2;
+        context.lineTo(x, particle.y + Math.sin(phase + point * 1.05) * wave * .35);
+      }
+      context.stroke();
+    } else {
+      const shadow = radius * (1 + variation * .1);
+      context.ellipse(particle.x + shadow * .24, particle.y + shadow * .32, shadow, shadow * .34, phase, 0, Math.PI * 2); context.stroke();
+    }
+    context.restore();
+  }
 }
 
 function updateParticle(particle, delta, time) {
@@ -498,6 +565,10 @@ function updateParticle(particle, delta, time) {
   } else if (CONFIG.motion === "Burst") {
     particle.vx *= 1 + .0005 * step;
     particle.vy *= 1 + .0005 * step;
+  } else if (CONFIG.motion !== "Off") {
+    const acceleration = motionAcceleration(CONFIG.motion, CONFIG.motionStyles, particle.x, particle.y, time, particle.phase, particle.seed, CONFIG.speed, width, height);
+    particle.vx += acceleration.x * acceleration.force * step;
+    particle.vy += acceleration.y * acceleration.force * step;
   }
   if (CONFIG.effects.includes("Magnetic Field") && pointer.active) {
     const dx = pointer.x - particle.x, dy = pointer.y - particle.y;
@@ -513,13 +584,8 @@ function updateParticle(particle, delta, time) {
     const distance = Math.max(Math.hypot(dx, dy), 1), reach = CONFIG.interactionRadius;
     if (distance < reach) {
       const force = (1 - distance / reach) * CONFIG.interactionStrength * step;
-      if (CONFIG.interaction === "Repel") {
-        particle.vx -= dx / distance * force; particle.vy -= dy / distance * force;
-      } else if (CONFIG.interaction === "Attract") {
-        particle.vx += dx / distance * force; particle.vy += dy / distance * force;
-      } else {
-        particle.vx += -dy / distance * force; particle.vy += dx / distance * force;
-      }
+      const response = touchForce(CONFIG.interaction, CONFIG.touchBehaviors, dx, dy, distance, time, particle.phase, particle.seed);
+      particle.vx += response.x * force * response.scale; particle.vy += response.y * force * response.scale;
     }
   }
   particle.x += particle.vx * step;
