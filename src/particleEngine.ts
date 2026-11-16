@@ -24,7 +24,7 @@ export type SvgMorphEasing = "Linear" | "Ease In Out" | "Ease Out";
 export type SvgMorphType = "Direct" | "Dissolve" | "Scatter";
 
 /** Highest particle count the engine will simulate. */
-export const MAX_PARTICLES = 4000;
+export const MAX_PARTICLES = 12000;
 
 export interface ParticleSettings {
   count: number;

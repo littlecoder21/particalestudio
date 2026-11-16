@@ -1,3 +1,7 @@
+import { analyzeSvg, QUALITY_PIXELS, rasterSize, type SvgQuality } from "./svgEngine/analyze";
+import { generateSamples } from "./svgEngine/sampler";
+
+export type { SvgQuality } from "./svgEngine/analyze";
 export type SvgSamplingMode = "Outline" | "Fill" | "Combined";
 export type SvgDistribution = "Uniform" | "Random" | "Weighted" | "Density";
 
@@ -22,6 +26,14 @@ export interface SvgSource {
   mode: SvgSamplingMode;
   distribution: SvgDistribution;
   spacing: number;
+  /** Analysis resolution: Fast 1024 px, High 2048 px, Ultra 3072 px (default High). */
+  quality?: SvgQuality;
+  /** Share (0-100) of the particles placed on the outer border (default 35). */
+  borderDetail?: number;
+  /** Share (0-100) of the particles placed on inner edges (default 25). */
+  edgeDetail?: number;
+  /** Extra particle density at sharp corners, 0-100 (default 60). */
+  cornerSharpness?: number;
 }
 
 export interface SvgSamplePoint {
@@ -30,9 +42,32 @@ export interface SvgSamplePoint {
   color: string;
 }
 
-const maximumSvgBytes = 1_000_000;
-const maximumGeometryCount = 256;
-const rasterSize = 512;
+export const SVG_DETAIL_DEFAULTS = {
+  quality: "High" as SvgQuality,
+  borderDetail: 35,
+  edgeDetail: 25,
+  cornerSharpness: 60,
+};
+
+export interface SvgSampleStats {
+  total: number;
+  border: number;
+  edges: number;
+  fill: number;
+  /** Traced silhouette + inner contours available for placement. */
+  contours: number;
+  /** Analysis raster, e.g. "2048 × 1536". */
+  resolution: string;
+  /** Total time for this call in milliseconds. */
+  ms: number;
+  /** True when the heavy analysis was reused from the cache. */
+  cached: boolean;
+  /** Nearly every sampled colour is very dark (invisible on a dark canvas). */
+  dark: boolean;
+}
+
+const maximumSvgBytes = 5_000_000;
+const maximumGeometryCount = 1500;
 const geometrySelector = "path,rect,circle,ellipse,line,polyline,polygon";
 const allowedElements = new Set([
   "svg", "g", "path", "rect", "circle", "ellipse", "line", "polyline", "polygon",
@@ -43,7 +78,7 @@ const allowedAttributes = new Set([
   "d", "x", "y", "x1", "y1", "x2", "y2", "cx", "cy", "r", "rx", "ry", "points",
   "transform", "fill", "fill-rule", "clip-rule", "stroke", "stroke-width", "stroke-linecap",
   "stroke-linejoin", "stroke-dasharray", "stroke-dashoffset", "opacity", "fill-opacity",
-  "stroke-opacity", "clip-path",   "mask", "href", "xlink:href", "offset", "stop-color", "stop-opacity",
+  "stroke-opacity", "clip-path", "mask", "href", "xlink:href", "offset", "stop-color", "stop-opacity",
   "gradientUnits", "gradientTransform", "spreadMethod", "fx", "fy", "fr", "clipPathUnits",
   "maskUnits",
 ]);
@@ -55,30 +90,6 @@ const inlineStyleProperties = [
 const safeSelectorToken = "(?:(?:[a-z][\\w-]*)?(?:[.#][\\w-]+)+|[a-z][\\w-]*)";
 const safeSelector = new RegExp(`^${safeSelectorToken}(?:\\s*(?:>\\s*|\\s+)${safeSelectorToken})*$`, "i");
 const excludedGeometryParents = new Set(["defs", "clipPath", "mask"]);
-
-interface RasterizedSvg {
-  pixels: ImageData;
-  width: number;
-  height: number;
-}
-
-interface OutlineSegment {
-  shape: SVGGeometryElement;
-  length: number;
-  geometryLength: number;
-  weight: number;
-  matrix: DOMMatrix;
-  localDistances: number[];
-  transformedDistances: number[];
-}
-
-function rasterDimensions(source: SvgSource): { width: number; height: number } {
-  const scale = rasterSize / Math.max(source.viewBox.width, source.viewBox.height);
-  return {
-    width: Math.max(1, Math.round(source.viewBox.width * scale)),
-    height: Math.max(1, Math.round(source.viewBox.height * scale)),
-  };
-}
 
 function isGeometry(element: Element): element is SVGGeometryElement {
   return element.namespaceURI === "http://www.w3.org/2000/svg" &&
@@ -203,7 +214,9 @@ function parseMarkup(markup: string): SVGSVGElement {
 
 export function parseSvgSource(markup: string, name: string): SvgSource {
   if (!markup.trim()) throw new Error("The SVG file is empty.");
-  if (new Blob([markup]).size > maximumSvgBytes) throw new Error("SVG files must be smaller than 1 MB.");
+  if (new Blob([markup]).size > maximumSvgBytes) {
+    throw new Error(`SVG files must be smaller than ${maximumSvgBytes / 1_000_000} MB.`);
+  }
 
   const root = parseMarkup(markup);
   const viewBox = parseViewBox(root);
@@ -241,278 +254,93 @@ export function parseSvgSource(markup: string, name: string): SvgSource {
     mode: "Combined",
     distribution: "Uniform",
     spacing: 12,
+    ...SVG_DETAIL_DEFAULTS,
   };
 }
 
-function svgWithOnlySelectedShape(source: SvgSource): SVGSVGElement {
-  const root = parseMarkup(source.markup);
-  if (source.selectedPath === "all") return root;
-  const shapes = visibleGeometries(root);
-  const selected = shapes.find((shape) => shape.id === source.selectedPath);
-  if (!selected) throw new Error("The selected SVG shape is no longer available.");
-  for (const shape of shapes) {
-    if (shape !== selected) shape.style.setProperty("display", "none", "important");
-  }
-  return root;
-}
-
-function makeHiddenSvg(source: SvgSource): { host: HTMLDivElement; root: SVGSVGElement; shapes: SVGGeometryElement[] } {
-  const dimensions = rasterDimensions(source);
-  const host = document.createElement("div");
-  host.setAttribute("aria-hidden", "true");
-  Object.assign(host.style, {
-    position: "fixed",
-    left: "-10000px",
-    top: "0",
-    width: `${dimensions.width}px`,
-    height: `${dimensions.height}px`,
-    overflow: "hidden",
-    opacity: "0",
-    pointerEvents: "none",
-  });
-  const root = svgWithOnlySelectedShape(source);
-  root.setAttribute("width", String(dimensions.width));
-  root.setAttribute("height", String(dimensions.height));
-  root.setAttribute("viewBox", `${source.viewBox.x} ${source.viewBox.y} ${source.viewBox.width} ${source.viewBox.height}`);
-  host.appendChild(document.importNode(root, true));
-  document.body.appendChild(host);
-  const attachedRoot = host.querySelector("svg");
-  if (!attachedRoot) {
-    host.remove();
-    throw new Error("Could not prepare this SVG for sampling.");
-  }
-  return { host, root: attachedRoot as unknown as SVGSVGElement, shapes: visibleGeometries(attachedRoot as unknown as SVGSVGElement) };
-}
-
-async function rasterizeSvg(source: SvgSource): Promise<RasterizedSvg> {
-  const dimensions = rasterDimensions(source);
-  const root = svgWithOnlySelectedShape(source);
-  root.setAttribute("width", String(dimensions.width));
-  root.setAttribute("height", String(dimensions.height));
-  root.setAttribute("viewBox", `${source.viewBox.x} ${source.viewBox.y} ${source.viewBox.width} ${source.viewBox.height}`);
-  const markup = new XMLSerializer().serializeToString(root);
-  const blobUrl = URL.createObjectURL(new Blob([markup], { type: "image/svg+xml" }));
-  try {
-    const image = new Image();
-    await new Promise<void>((resolve, reject) => {
-      image.onload = () => resolve();
-      image.onerror = () => reject(new Error("The SVG could not be rendered for sampling."));
-      image.src = blobUrl;
-    });
-    const canvas = document.createElement("canvas");
-    canvas.width = dimensions.width;
-    canvas.height = dimensions.height;
-    const context = canvas.getContext("2d", { willReadFrequently: true });
-    if (!context) throw new Error("This browser cannot sample SVG pixels.");
-    context.drawImage(image, 0, 0, dimensions.width, dimensions.height);
-    return {
-      pixels: context.getImageData(0, 0, dimensions.width, dimensions.height),
-      ...dimensions,
-    };
-  } finally {
-    URL.revokeObjectURL(blobUrl);
-  }
-}
-
-function pointColor(raster: RasterizedSvg, x: number, y: number): string {
-  const px = Math.max(0, Math.min(raster.width - 1, Math.floor(x)));
-  const py = Math.max(0, Math.min(raster.height - 1, Math.floor(y)));
-  const index = (py * raster.width + px) * 4;
-  const { data } = raster.pixels;
-  if (data[index + 3] < 8) return "#ffffff";
-  return `#${[data[index], data[index + 1], data[index + 2]].map((channel) => channel.toString(16).padStart(2, "0")).join("")}`;
-}
-
-function normalizedPoint(source: SvgSource, x: number, y: number, color: string): SvgSamplePoint {
-  const diameter = Math.max(source.viewBox.width, source.viewBox.height);
+/** Detail settings with defaults filled in (older saved projects have none of them). */
+export function svgDetailOptions(source: SvgSource) {
+  const clamp = (value: number | undefined, fallback: number) =>
+    typeof value === "number" && Number.isFinite(value) ? Math.min(100, Math.max(0, value)) : fallback;
   return {
-    x: (x - source.viewBox.x - source.viewBox.width / 2) / diameter,
-    y: (y - source.viewBox.y - source.viewBox.height / 2) / diameter,
-    color,
+    quality: source.quality && source.quality in QUALITY_PIXELS ? source.quality : SVG_DETAIL_DEFAULTS.quality,
+    borderDetail: clamp(source.borderDetail, SVG_DETAIL_DEFAULTS.borderDetail),
+    edgeDetail: clamp(source.edgeDetail, SVG_DETAIL_DEFAULTS.edgeDetail),
+    cornerSharpness: clamp(source.cornerSharpness, SVG_DETAIL_DEFAULTS.cornerSharpness),
   };
 }
 
-function sampleOutline(
-  source: SvgSource,
-  count: number,
-  raster: RasterizedSvg,
-): SvgSamplePoint[] {
-  const { host, root, shapes } = makeHiddenSvg(source);
-  try {
-    const rootMatrix = root.getScreenCTM();
-    if (!rootMatrix) throw new Error("The browser could not measure this SVG.");
-    const rootInverse = rootMatrix.inverse();
-    const segments = shapes.map((shape): OutlineSegment | null => {
-      const localLength = shape.getTotalLength();
-      const matrix = shape.getScreenCTM();
-      if (localLength <= 0 || !matrix) return null;
-      const transform = rootInverse.multiply(matrix);
-      const localDistances = [0];
-      const transformedDistances = [0];
-      const firstPoint = shape.getPointAtLength(0);
-      let previousPoint = new DOMPoint(firstPoint.x, firstPoint.y).matrixTransform(transform);
-      const subdivisions = 96;
-      for (let index = 1; index <= subdivisions; index += 1) {
-        const distance = (localLength * index) / subdivisions;
-        const point = shape.getPointAtLength(distance);
-        const transformedPoint = new DOMPoint(point.x, point.y).matrixTransform(transform);
-        const previousDistance = transformedDistances[transformedDistances.length - 1];
-        transformedDistances.push(previousDistance + Math.hypot(
-          transformedPoint.x - previousPoint.x,
-          transformedPoint.y - previousPoint.y,
-        ));
-        localDistances.push(distance);
-        previousPoint = transformedPoint;
-      }
-      const length = transformedDistances[transformedDistances.length - 1];
-      const style = getComputedStyle(shape);
-      const weight = length * Math.max(Number.parseFloat(style.strokeWidth) || 1, 0.1) *
-        Math.max(Number.parseFloat(style.opacity) || 1, 0.1);
-      return {
-        shape,
-        length,
-        geometryLength: localLength,
-        weight,
-        matrix: transform,
-        localDistances,
-        transformedDistances,
-      };
-    }).filter((segment): segment is OutlineSegment => segment !== null && segment.length > 0);
-
-    if (segments.length === 0) return [];
-
-    const totalLength = segments.reduce((total, segment) => total + segment.length, 0);
-    const weightedLength = segments.reduce((total, segment) => total + segment.weight, 0);
-    const amount = source.distribution === "Density"
-      ? Math.min(count, Math.max(1, Math.ceil(totalLength / source.spacing)))
-      : count;
-    const result: SvgSamplePoint[] = [];
-    for (let index = 0; index < amount; index += 1) {
-      const useWeighted = source.distribution === "Weighted";
-      const sampleLength = source.distribution === "Random"
-        ? Math.random() * totalLength
-        : (index + (source.distribution === "Density" ? 0.5 : 0)) /
-          Math.max(amount, 1) * (useWeighted ? weightedLength : totalLength);
-      let accumulated = 0;
-      let selected = segments[segments.length - 1];
-      let selectedWeight = useWeighted ? selected.weight : selected.length;
-      for (const segment of segments) {
-        const computed = useWeighted ? segment.weight : segment.length;
-        if (sampleLength < accumulated + computed) {
-          selected = segment;
-          selectedWeight = computed;
-          break;
-        }
-        accumulated += computed;
-      }
-      const segmentDistance = source.distribution === "Random"
-        ? Math.random() * selected.length
-        : ((sampleLength - accumulated) / selectedWeight) * selected.length;
-      let lower = 0;
-      let upper = selected.transformedDistances.length - 1;
-      while (lower + 1 < upper) {
-        const middle = Math.floor((lower + upper) / 2);
-        if (selected.transformedDistances[middle] < segmentDistance) lower = middle;
-        else upper = middle;
-      }
-      const distanceStart = selected.transformedDistances[lower];
-      const distanceEnd = selected.transformedDistances[upper];
-      const interpolation = distanceEnd > distanceStart
-        ? (segmentDistance - distanceStart) / (distanceEnd - distanceStart)
-        : 0;
-      const localLength = selected.localDistances[lower] +
-        (selected.localDistances[upper] - selected.localDistances[lower]) * interpolation;
-      const sample = selected.shape.getPointAtLength(Math.max(0, Math.min(localLength, selected.geometryLength)));
-      const transformed = new DOMPoint(sample.x, sample.y).matrixTransform(selected.matrix!);
-      const x = transformed.x;
-      const y = transformed.y;
-      const pixelX = ((x - source.viewBox.x) / source.viewBox.width) * raster.width;
-      const pixelY = ((y - source.viewBox.y) / source.viewBox.height) * raster.height;
-      result.push(normalizedPoint(source, x, y, pointColor(raster, pixelX, pixelY)));
-    }
-    return result;
-  } finally {
-    host.remove();
+/** Copies validated detail settings from saved project data onto a freshly parsed source. */
+export function restoreSvgDetail(source: SvgSource, saved: Record<string, unknown>): void {
+  if (saved.quality === "Fast" || saved.quality === "High" || saved.quality === "Ultra") source.quality = saved.quality;
+  for (const key of ["borderDetail", "edgeDetail", "cornerSharpness"] as const) {
+    const value = saved[key];
+    if (typeof value === "number" && value >= 0 && value <= 100) source[key] = value;
   }
 }
 
-interface PixelCandidate {
-  x: number;
-  y: number;
-  index: number;
-  weight: number;
-}
+const HEX = Array.from({ length: 256 }, (_, i) => i.toString(16).padStart(2, "0"));
 
-function sampleFill(source: SvgSource, count: number, raster: RasterizedSvg): SvgSamplePoint[] {
-  const candidates: PixelCandidate[] = [];
-  const { data } = raster.pixels;
-  for (let y = 0; y < raster.height; y += 1) {
-    for (let x = 0; x < raster.width; x += 1) {
-      const index = (y * raster.width + x) * 4;
-      const alpha = data[index + 3];
-      if (alpha >= 32) candidates.push({ x: x + 0.5, y: y + 0.5, index, weight: alpha });
-    }
+/**
+ * Samples particle positions (with source colours) from the SVG. The heavy analysis is cached, so
+ * calling this again with another particle count or detail setting is fast.
+ */
+export async function sampleSvgSourceDetailed(
+  source: SvgSource, count: number,
+): Promise<{ points: SvgSamplePoint[]; stats: SvgSampleStats }> {
+  if (!Number.isFinite(count) || count < 1) throw new Error("Particle count must be greater than zero.");
+  const started = performance.now();
+  const detail = svgDetailOptions(source);
+  const { promise, cached } = analyzeSvg({
+    markup: source.markup,
+    viewBox: source.viewBox,
+    selectedPath: source.selectedPath,
+    quality: detail.quality,
+  });
+  const analysis = await promise;
+  const set = generateSamples(analysis, {
+    mode: source.mode,
+    distribution: source.distribution,
+    spacing: source.spacing,
+    borderDetail: detail.borderDetail,
+    edgeDetail: detail.edgeDetail,
+    cornerSharpness: detail.cornerSharpness,
+  }, Math.floor(count));
+  if (set.stats.total === 0) throw new Error("No particles could be sampled from this SVG.");
+
+  const { viewBox } = source;
+  const diameter = Math.max(viewBox.width, viewBox.height);
+  const ax = viewBox.width / diameter;
+  const ay = viewBox.height / diameter;
+  const points: SvgSamplePoint[] = new Array(set.stats.total);
+  let dark = 0;
+  for (let i = 0; i < points.length; i += 1) {
+    const rgb = set.rgb[i];
+    const r = (rgb >> 16) & 255, g = (rgb >> 8) & 255, b = rgb & 255;
+    if (0.2126 * r + 0.7152 * g + 0.0722 * b < 51) dark += 1;
+    points[i] = {
+      x: (set.x[i] / analysis.width - 0.5) * ax,
+      y: (set.y[i] / analysis.height - 0.5) * ay,
+      color: `#${HEX[r]}${HEX[g]}${HEX[b]}`,
+    };
   }
-  if (candidates.length === 0) throw new Error("This SVG has no visible filled area to sample.");
-
-  const amount = source.distribution === "Density"
-    ? Math.min(count, Math.max(1, Math.ceil(candidates.length / (source.spacing * source.spacing))))
-    : count;
-  const result: SvgSamplePoint[] = [];
-  const columns = Math.max(1, Math.ceil(Math.sqrt(amount * raster.width / raster.height)));
-  const rows = Math.max(1, Math.ceil(amount / columns));
-  const buckets = source.distribution === "Uniform" ? Array.from({ length: columns * rows }, () => [] as PixelCandidate[]) : [];
-
-  if (buckets.length > 0) {
-    for (const candidate of candidates) {
-      const column = Math.min(columns - 1, Math.floor(candidate.x / raster.width * columns));
-      const row = Math.min(rows - 1, Math.floor(candidate.y / raster.height * rows));
-      buckets[row * columns + column].push(candidate);
-    }
-  }
-
-  const chooseWeighted = (items: PixelCandidate[]): PixelCandidate => {
-    const total = items.reduce((sum, item) => sum + item.weight, 0);
-    let value = Math.random() * total;
-    for (const item of items) {
-      value -= item.weight;
-      if (value <= 0) return item;
-    }
-    return items[items.length - 1];
+  const size = rasterSize(viewBox, detail.quality);
+  return {
+    points,
+    stats: {
+      total: set.stats.total,
+      border: set.stats.border,
+      edges: set.stats.edges,
+      fill: set.stats.fill,
+      contours: analysis.borders.length + analysis.edges.length,
+      resolution: `${size.width} × ${size.height}`,
+      ms: Math.round(performance.now() - started),
+      cached,
+      dark: dark / points.length >= 0.95,
+    },
   };
-
-  for (let index = 0; index < amount; index += 1) {
-    let candidate: PixelCandidate;
-    if (source.distribution === "Uniform") {
-      const bucketIndex = Math.min(buckets.length - 1, Math.floor((index + 0.5) * buckets.length / amount));
-      const bucket = buckets[bucketIndex];
-      candidate = bucket.length > 0 ? bucket[Math.floor(Math.random() * bucket.length)] : candidates[Math.floor(Math.random() * candidates.length)];
-    } else if (source.distribution === "Weighted") {
-      candidate = chooseWeighted(candidates);
-    } else {
-      candidate = candidates[Math.floor(Math.random() * candidates.length)];
-    }
-    const x = (candidate.x / raster.width) * source.viewBox.width + source.viewBox.x;
-    const y = (candidate.y / raster.height) * source.viewBox.height + source.viewBox.y;
-    const pixel = candidate.index;
-    const color = `#${[data[pixel], data[pixel + 1], data[pixel + 2]].map((channel) => channel.toString(16).padStart(2, "0")).join("")}`;
-    result.push(normalizedPoint(source, x, y, color));
-  }
-  return result;
 }
 
 export async function sampleSvgSource(source: SvgSource, count: number): Promise<SvgSamplePoint[]> {
-  if (!Number.isFinite(count) || count < 1) throw new Error("Particle count must be greater than zero.");
-  const raster = await rasterizeSvg(source);
-  const points: SvgSamplePoint[] = [];
-  if (source.mode === "Outline" || source.mode === "Combined") {
-    const outlineCount = source.mode === "Combined" ? Math.ceil(count / 2) : count;
-    points.push(...sampleOutline(source, outlineCount, raster));
-  }
-  if (source.mode === "Fill" || source.mode === "Combined") {
-    const fillCount = source.mode === "Combined" ? Math.floor(count / 2) : count;
-    if (fillCount > 0) points.push(...sampleFill(source, fillCount, raster));
-  }
-  if (points.length === 0) throw new Error("No particles could be sampled from this SVG.");
-  return points;
+  return (await sampleSvgSourceDetailed(source, count)).points;
 }

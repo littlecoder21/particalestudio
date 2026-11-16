@@ -18,12 +18,16 @@ import { availableEffects, isParticleEffect, type ParticleEffect } from "./effec
 import { readDesignerLibrary, sampleGeometry, validateGeometryDocument, type GeometryDocument } from "./geometry/model";
 import {
   parseSvgSource,
+  restoreSvgDetail,
   sampleSvgSource,
+  sampleSvgSourceDetailed,
   type SvgDistribution,
   type SvgSamplePoint,
+  type SvgSampleStats,
   type SvgSamplingMode,
   type SvgSource,
 } from "./svgSource";
+import { SvgDetailControls, darkNoticeSeen, isDarkHex } from "./svgEngine/SvgDetailControls";
 import { generateStudioExport } from "./studio2d/exportStudio";
 import { useDockSheet } from "./studio2d/dock";
 import { BackdropControls, BeamHandles, FxPanel, LibraryPanel, LightPanel, ShapeLockPanel } from "./studio2d/panels";
@@ -244,6 +248,7 @@ function restoreSvgSource(value: unknown): SvgSource | null {
   if (typeof candidate.spacing === "number" && candidate.spacing >= 2 && candidate.spacing <= 32) {
     source.spacing = candidate.spacing;
   }
+  restoreSvgDetail(source, candidate);
   return source;
 }
 
@@ -456,6 +461,7 @@ function App() {
   const [isSamplingSvg, setIsSamplingSvg] = useState(false);
   const [isSamplingSvgSequence, setIsSamplingSvgSequence] = useState(false);
   const [svgError, setSvgError] = useState("");
+  const [svgStats, setSvgStats] = useState<SvgSampleStats | null>(null);
   const [activeSection, setActiveSection] = useState<SectionId>("presets");
   const [generatorCategory, setGeneratorCategory] = useState<GeneratorCategory>("Geometric");
   const [menuOpen, setMenuOpen] = useState(true);
@@ -572,9 +578,21 @@ function App() {
     let cancelled = false;
     setIsSamplingSvg(true);
     setSvgError("");
-    sampleSvgSource(svgSource, settings.count)
-      .then((points) => {
-        if (!cancelled) setSvgPoints(points);
+    sampleSvgSourceDetailed(svgSource, settings.count)
+      .then(({ points, stats }) => {
+        if (cancelled) return;
+        setSvgPoints(points);
+        setSvgStats(stats);
+        // Black / very dark artwork is invisible on a dark canvas: use the palette colours once.
+        const key = `${svgSource.name}:${svgSource.markup.length}`;
+        if (stats.dark && !darkNoticeSeen.has(key)) {
+          darkNoticeSeen.add(key);
+          setSettings((current) =>
+            current.preserveSvgColors && current.backgroundMode !== "Transparent" && isDarkHex(current.backgroundColor)
+              ? { ...current, preserveSvgColors: false }
+              : current);
+          setNotice("Dark artwork detected – using your palette colours");
+        }
       })
       .catch((error: unknown) => {
         if (!cancelled) {
@@ -640,7 +658,7 @@ function App() {
     setIsSaved(false);
   };
 
-  const updateSvgSource = <K extends "selectedPath" | "mode" | "distribution" | "spacing">(
+  const updateSvgSource = <K extends "selectedPath" | "mode" | "distribution" | "spacing" | "quality" | "borderDetail" | "edgeDetail" | "cornerSharpness">(
     key: K,
     value: SvgSource[K],
   ) => {
@@ -1052,6 +1070,15 @@ function App() {
                   {svgSource.distribution === "Density" && (
                     <RangeControl label="Point spacing" value={svgSource.spacing} min={2} max={32} step={1} suffix=" px" onChange={(value) => updateSvgSource("spacing", value)} />
                   )}
+                  <SvgDetailControls
+                    source={svgSource}
+                    stats={isSamplingSvg ? null : svgStats}
+                    onChange={(patch) => {
+                      setSvgSources((current) =>
+                        current.map((item, index) => (index === activeSvgIndex ? { ...item, ...patch } : item)));
+                      setIsSaved(false);
+                    }}
+                  />
                   {isSamplingSvg && <p className="svg-source-status" role="status">Sampling SVG shape…</p>}
                   {!isSamplingSvg && !svgError && svgPoints.length > 0 && <p className="svg-source-status success" role="status">{settings.preserveSvgColors ? "Source colors preserved" : "Studio palette applied"} · ready to animate</p>}
                   <div className="control-divider" />

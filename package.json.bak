@@ -1,0 +1,28 @@
+{
+  "name": "particle-studio",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview",
+    "test:3d": "tsx --test tests/studio3d/*.test.ts",
+    "test:2d": "tsx --test tests/studio2d/*.test.ts",
+    "test:export:browser": "tsx tools/export-browser-tests/run.ts",
+    "test:export:ui": "tsx tools/export-browser-tests/ui.ts",
+    "test:export:parity": "tsx tools/export-browser-tests/parity.ts"
+  },
+  "dependencies": {
+    "@vitejs/plugin-react": "^4.3.4",
+    "vite": "^6.0.7",
+    "typescript": "~5.7.2",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "tsx": "^4.19.2"
+  }
+}
