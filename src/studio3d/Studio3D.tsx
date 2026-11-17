@@ -467,7 +467,7 @@ export default function Studio3D({ active, modeSwitch, initialProject }: { activ
   );
   const presets = (
     <>
-      <p className="s3-hint">70 procedural formations plus editable 3D text. Search or filter by category, then pick one to morph the particles into it.</p>
+      <p className="s3-hint">150 procedural formations plus editable 3D text. Search or filter by category, then pick one to morph the particles into it.</p>
       <TextField label="Search presets" value={presetSearch} onChange={setPresetSearch} />
       <Select label="Category" value={presetCategory} options={["All", ...presetGroups].map((v) => ({ value: v, label: v }))} onChange={setPresetCategory} />
       <div className="s3-grid">

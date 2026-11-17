@@ -1,6 +1,27 @@
 import type { GeneratorDef, GeneratorId } from "../types";
 import { TAU, clamp } from "../math";
 import { put, range } from "./common";
+import { SEA_SHAPES } from "./sea";
+import { ANATOMY_SHAPES } from "./anatomy";
+import { ANATOMY2_SHAPES } from "./anatomy2";
+import { BIRD_SHAPES } from "./birds";
+import { QUAD_SHAPES } from "./quadrupeds";
+import { CREATURE_SHAPES } from "./creatures";
+import { ANIMAL_SHAPES } from "./animals";
+import { MARINE_SHAPES } from "./marine";
+import { INSECT_SHAPES } from "./insects";
+import { PLANT_SHAPES } from "./plants";
+import { PLANT2_SHAPES } from "./plants2";
+import { OBJECTS1_SHAPES } from "./objects1";
+import { OBJECTS2_SHAPES } from "./objects2";
+import { OBJECTS3_SHAPES } from "./objects3";
+import { OBJECTS4_SHAPES } from "./objects4";
+import { GEO_SHAPES } from "./geo";
+import { MATHA_SHAPES } from "./mathA";
+import { MATHB_SHAPES } from "./mathB";
+import { SPACE1_SHAPES } from "./space1";
+import { SPACE2_SHAPES } from "./space2";
+import { BIO_SHAPES } from "./bio";
 
 const PRESETS: Array<{ id: GeneratorId; name: string; group: string; description: string }> = [
   { id: "geo-sphere", name: "Sphere", group: "Geometric 3D objects", description: "A clean spherical particle shell." },
@@ -310,4 +331,10 @@ export const TEXT_SHAPE: GeneratorDef = {
   },
 };
 
-export const SHAPES5: GeneratorDef[] = [...SHAPE_PRESETS, TEXT_SHAPE];
+/** Hand-sculpted presets (see sculpt.ts). Anything listed here replaces the older procedural stand-in with the same id. */
+const SCULPTED: GeneratorDef[] = [
+  ...SEA_SHAPES, ...ANATOMY_SHAPES, ...ANATOMY2_SHAPES, ...BIRD_SHAPES, ...QUAD_SHAPES, ...CREATURE_SHAPES, ...ANIMAL_SHAPES, ...MARINE_SHAPES, ...INSECT_SHAPES,
+  ...PLANT_SHAPES, ...PLANT2_SHAPES, ...OBJECTS1_SHAPES, ...OBJECTS2_SHAPES, ...OBJECTS3_SHAPES, ...OBJECTS4_SHAPES, ...GEO_SHAPES, ...MATHA_SHAPES, ...MATHB_SHAPES, ...SPACE1_SHAPES, ...SPACE2_SHAPES, ...BIO_SHAPES,
+];
+const SCULPTED_IDS = new Set<string>(SCULPTED.map((g) => g.id));
+export const SHAPES5: GeneratorDef[] = [...SCULPTED, ...SHAPE_PRESETS.filter((g) => !SCULPTED_IDS.has(g.id)), TEXT_SHAPE];

@@ -21,6 +21,14 @@ export type GeneratorId =
   | "nature-butterfly" | "nature-brain" | "nature-skull" | "nature-dna" | "nature-tree" | "nature-flower" | "nature-rose" | "nature-jellyfish" | "nature-seahorse" | "nature-dragon"
   | "math-klein-bottle" | "math-mobius-strip" | "math-trefoil-knot" | "math-mobius-torus" | "math-gyroid" | "math-mandelbulb" | "math-lorenz-attractor" | "math-clifford-attractor" | "math-fibonacci-spiral" | "math-spherical-harmonics"
   | "form-human-face" | "form-human-body" | "form-human-hand" | "form-eagle" | "form-wolf" | "form-lion" | "form-phoenix" | "form-dna-molecule" | "form-crystal-cluster" | "form-infinity"
+  | "animal-horse" | "animal-elephant" | "animal-whale" | "animal-shark" | "animal-dolphin" | "animal-octopus" | "animal-sea-turtle" | "animal-owl" | "animal-swan" | "animal-cat" | "animal-stag" | "animal-giraffe"
+  | "animal-trex" | "animal-scorpion" | "animal-spider" | "animal-dragonfly" | "animal-bee" | "animal-crab" | "animal-manta-ray" | "animal-penguin" | "animal-cobra" | "animal-koi" | "animal-hummingbird" | "animal-snail"
+  | "body-heart" | "body-eye" | "body-lungs" | "body-ribcage" | "body-spine" | "body-neuron" | "body-virus" | "body-tooth"
+  | "plant-sunflower" | "plant-tulip" | "plant-lotus" | "plant-maple-leaf" | "plant-pine" | "plant-palm" | "plant-mushroom" | "plant-cactus"
+  | "obj-rocket" | "obj-ufo" | "obj-sailboat" | "obj-lighthouse" | "obj-eiffel-tower" | "obj-pagoda" | "obj-windmill" | "obj-guitar" | "obj-crown" | "obj-sword" | "obj-anchor" | "obj-hourglass" | "obj-lightbulb" | "obj-chess-knight"
+  | "math-sierpinski" | "math-menger-sponge" | "math-buckyball" | "math-tesseract" | "math-hopf-fibration" | "math-aizawa" | "math-thomas" | "math-rossler" | "math-halvorsen" | "math-dini-surface" | "math-enneper" | "math-schwarz-p" | "math-apollonian"
+  | "space-moon" | "space-sun" | "space-pulsar" | "space-astronaut" | "space-satellite"
+  | "myth-unicorn" | "myth-pegasus" | "myth-chinese-dragon" | "myth-griffin"
   | "text3d";
 
 export const MAX_LIGHT_BEAMS = 20;
@@ -45,12 +53,6 @@ export interface LightBeam {
   speed: number;
   motion: number;
   seed: number;
-  halo?: number;
-  haloSize?: number;
-  coreSharp?: number;
-  shimmer?: number;
-  lightColor?: string;
-  lightMix?: number;
 }
 
 /** One generated particle formation — structure of arrays, every array has length n (or 3n). */
